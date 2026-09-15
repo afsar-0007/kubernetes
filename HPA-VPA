@@ -1,0 +1,331 @@
+🚀 Kubernetes HPA & VPA
+
+Today I learned about Horizontal Pod Autoscaler (HPA) and Vertical Pod Autoscaler (VPA) in Kubernetes and how they help applications automatically adjust to changing workloads.
+
+Autoscaling is an important Kubernetes feature that helps maintain application performance, availability, and efficient resource utilization without requiring manual intervention.
+
+🔹 Horizontal Pod Autoscaler (HPA)
+
+Horizontal Pod Autoscaler (HPA) automatically adjusts the number of Pods running for a Kubernetes workload based on resource utilization or other supported metrics.
+
+In simple terms:
+
+HPA scales the number of Pods horizontally.
+
+For example:
+
+Low Traffic
+    ↓
+2 Pods
+
+High Traffic
+    ↓
+5 Pods
+
+Very High Traffic
+    ↓
+10 Pods
+
+When the workload decreases, HPA can reduce the number of Pods again.
+
+How HPA Works
+Application
+     ↓
+    Pods
+     ↓
+Metrics Server
+     ↓
+     HPA
+     ↓
+Checks Metrics
+     ↓
+Adjusts Replicas
+     ↓
+Deployment
+     ↓
+More / Fewer Pods
+
+HPA can use metrics such as:
+
+CPU utilization
+Memory utilization
+Custom metrics
+External metrics
+Example HPA Configuration
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+
+metadata:
+  name: my-app-hpa
+
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: my-app
+
+  minReplicas: 2
+  maxReplicas: 10
+
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+
+Here:
+
+minReplicas: 2 → Minimum 2 Pods.
+maxReplicas: 10 → Maximum 10 Pods.
+averageUtilization: 50 → HPA attempts to maintain average CPU utilization around 50%.
+Important HPA Commands
+kubectl get hpa
+kubectl describe hpa <hpa-name>
+kubectl get hpa -w
+kubectl top pods
+kubectl top nodes
+🔹 Vertical Pod Autoscaler (VPA)
+
+Vertical Pod Autoscaler (VPA) automatically adjusts the CPU and memory resource requests/allocations of Pods based on their actual resource usage and recommendations.
+
+In simple terms:
+
+VPA makes individual Pods bigger or smaller in terms of CPU and memory resources.
+
+For example:
+
+Before VPA:
+
+CPU:    250m
+Memory: 256Mi
+
+        ↓ VPA Recommendation
+
+After:
+
+CPU:    750m
+Memory: 768Mi
+
+Unlike HPA, VPA generally does not increase the number of Pods. Instead, it focuses on right-sizing the resources assigned to Pods.
+
+🔹 How VPA Works
+Application
+     ↓
+    Pods
+     ↓
+Resource Usage
+     ↓
+VPA Recommender
+     ↓
+CPU / Memory Recommendation
+     ↓
+VPA Controller
+     ↓
+Updates Pod Resources
+
+VPA observes resource usage over time and generates recommendations for CPU and memory.
+
+Example VPA Configuration
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+
+metadata:
+  name: my-app-vpa
+
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: my-app
+
+  updatePolicy:
+    updateMode: "Auto"
+
+  resourcePolicy:
+    containerPolicies:
+      - containerName: "*"
+
+        minAllowed:
+          cpu: "100m"
+          memory: "128Mi"
+
+        maxAllowed:
+          cpu: "1"
+          memory: "1Gi"
+VPA Update Modes
+Off
+updateMode: "Off"
+
+VPA only provides recommendations and doesn't automatically change Pods.
+
+Initial
+updateMode: "Initial"
+
+Recommended resources are applied when Pods are initially created.
+
+Recreate
+updateMode: "Recreate"
+
+VPA can recreate Pods when resource recommendations need to be applied.
+
+Auto
+updateMode: "Auto"
+
+Allows VPA to automatically apply resource recommendations. Depending on the required change, Pods may be evicted/recreated.
+
+🔥 HPA vs VPA
+Feature	HPA	VPA
+Full Name	Horizontal Pod Autoscaler	Vertical Pod Autoscaler
+Scaling Type	Horizontal	Vertical
+Changes	Number of Pods	CPU & Memory Resources
+Main Purpose	Scale application capacity	Right-size resources
+Example	3 Pods → 8 Pods	500m CPU → 1 CPU
+Pod Count	Increases/Decreases	Usually unchanged
+Resource Size	Doesn't primarily change it	Changes it
+Best For	Variable traffic	Uncertain resource requirements
+🧠 Easy Way to Remember
+HPA → More / Fewer Pods
+VPA → Bigger / Smaller Pods
+
+Or:
+
+HPA = Scale OUT / IN
+VPA = Scale UP / DOWN
+🔹 HPA Example in Real World
+
+Imagine an e-commerce application normally running with:
+
+3 Pods
+CPU Usage = 30%
+
+During a sale:
+
+CPU Usage = 85%
+
+HPA detects the increased workload and can scale:
+
+3 Pods
+   ↓
+5 Pods
+   ↓
+8 Pods
+
+When the sale ends and traffic decreases:
+
+8 Pods
+   ↓
+5 Pods
+   ↓
+3 Pods
+
+This allows the application to automatically adapt to traffic.
+
+🔹 VPA Example in Real World
+
+Suppose a background worker has:
+
+CPU Request:    250m
+Memory Request: 256Mi
+
+But over time, the application consistently requires more resources.
+
+VPA may recommend:
+
+CPU Request:    750m
+Memory Request: 768Mi
+
+Instead of adding more Pods, VPA right-sizes the resources of the existing workload.
+
+⚠️ HPA and VPA Together
+
+HPA and VPA can be used together in some architectures, but they must be configured carefully.
+
+A common concern is using HPA and VPA on the same CPU/memory utilization signal. VPA can change resource requests, which can affect the utilization calculation that HPA uses.
+
+Therefore, combining them requires careful planning and testing.
+
+A common conceptual design is:
+
+                 Application
+                     │
+                     ↓
+                  Pods
+                /       \
+               ↓         ↓
+             HPA        VPA
+              ↓          ↓
+        Pod Count     CPU/Memory
+         Scaling      Right-sizing
+🎯 When to Use HPA?
+
+Use HPA when:
+
+Application traffic changes frequently.
+Request volume increases/decreases.
+You need more Pods during peak traffic.
+You are running stateless applications.
+You want automatic scale-out and scale-in.
+
+Examples:
+
+Web Applications
+REST APIs
+Microservices
+E-commerce Applications
+🎯 When to Use VPA?
+
+Use VPA when:
+
+CPU and memory requirements are difficult to predict.
+Pods are consistently under-provisioned.
+Pods are consistently over-provisioned.
+You want to optimize resource requests.
+You want automatic resource right-sizing.
+
+Examples:
+
+Background Workers
+Batch Processing
+Long-running workloads
+Applications with unpredictable resource requirements
+📌 Key Takeaways
+
+Today I learned:
+
+What HPA (Horizontal Pod Autoscaler) is.
+What VPA (Vertical Pod Autoscaler) is.
+Difference between horizontal and vertical scaling.
+How HPA automatically changes the number of Pods.
+How VPA adjusts CPU and memory resources.
+How Metrics Server provides resource metrics.
+Importance of CPU and memory resource requests.
+How to configure HPA using autoscaling/v2.
+How to configure VPA using autoscaling.k8s.io/v1.
+HPA metrics and scaling behavior.
+VPA update modes: Off, Initial, Recreate, and Auto.
+Difference between HPA and VPA.
+Real-world use cases for both autoscaling mechanisms.
+Considerations when using HPA and VPA together.
+🚀 What I Learned Today
+
+Today I learned how Kubernetes provides automatic scaling using HPA and VPA. HPA focuses on horizontally scaling applications by increasing or decreasing the number of Pods, while VPA focuses on vertically scaling workloads by adjusting CPU and memory resources. Understanding both autoscaling mechanisms is essential for building scalable, reliable, and resource-efficient Kubernetes applications.
+
+Quick Revision
+                Kubernetes Autoscaling
+                         │
+              ┌──────────┴──────────┐
+              ↓                     ↓
+             HPA                   VPA
+              │                     │
+       Horizontal Scaling     Vertical Scaling
+              │                     │
+       Changes Pod Count      Changes Resources
+              │                     │
+       More / Fewer Pods       More / Less CPU
+                              More / Less Memory
+
+GitHub commit message ke liye ye use karna zyada clean lagega:
+
+git commit -m "Learn HPA and VPA autoscaling in Kubernetes"
