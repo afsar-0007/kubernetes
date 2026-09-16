@@ -1,0 +1,384 @@
+🔐 Kubernetes RBAC (Role-Based Access Control)
+
+RBAC (Role-Based Access Control) is a Kubernetes authorization mechanism used to control what users, groups, and service accounts are allowed to do within a Kubernetes cluster.
+
+Instead of giving every user full access to the cluster, RBAC allows administrators to define specific permissions based on roles.
+
+🧠 Core idea
+User / ServiceAccount
+        ↓
+    RoleBinding
+        ↓
+       Role
+        ↓
+    Permissions
+
+For cluster-wide permissions:
+
+User / ServiceAccount
+        ↓
+ClusterRoleBinding
+        ↓
+   ClusterRole
+        ↓
+   Permissions
+
+RBAC follows the Principle of Least Privilege, meaning users and applications should receive only the permissions they actually need.
+
+📌 What does RBAC control?
+
+RBAC permissions are generally based on three things:
+
+WHO → Subject
+WHAT → Resource
+ACTION → Verb
+
+For example:
+
+User: afsar
+Resource: Pods
+Action: get
+
+means:
+
+User afsar is allowed to retrieve Pods.
+
+Common verbs include:
+
+get
+list
+watch
+create
+update
+patch
+delete
+1️⃣ Role
+
+A Role defines permissions for resources within a specific namespace.
+
+Example:
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+
+metadata:
+  name: pod-reader
+  namespace: development
+
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+
+This Role says:
+
+In the development namespace, the subject can get, list, and watch Pods.
+
+It does not give access to Pods in every namespace.
+
+Important:
+Role
+ ↓
+Namespace-scoped permissions
+2️⃣ RoleBinding
+
+A RoleBinding connects a Role to a user, group, or ServiceAccount.
+
+The Role defines what permissions exist, while the RoleBinding determines who receives those permissions.
+
+Example:
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+
+metadata:
+  name: pod-reader-binding
+  namespace: development
+
+subjects:
+  - kind: User
+    name: developer
+    apiGroup: rbac.authorization.k8s.io
+
+roleRef:
+  kind: Role
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+
+Now:
+
+developer
+    ↓
+RoleBinding
+    ↓
+pod-reader Role
+    ↓
+get/list/watch Pods
+    ↓
+development namespace
+🧠 Easy way to remember
+
+Role = What can be done?
+RoleBinding = Who can do it?
+
+3️⃣ ClusterRole
+
+A ClusterRole defines permissions that can be used at the cluster level or for namespaced resources across namespaces.
+
+Example:
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+
+metadata:
+  name: pod-reader
+
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+
+A ClusterRole can define permissions for:
+
+Pods
+Services
+Deployments
+Nodes
+Namespaces
+PersistentVolumes
+etc.
+
+Unlike a Role, ClusterRole is not limited to one namespace.
+
+For example, permissions can include cluster-scoped resources such as:
+
+Nodes
+Namespaces
+PersistentVolumes
+4️⃣ ClusterRoleBinding
+
+A ClusterRoleBinding connects a ClusterRole to a user, group, or ServiceAccount at the cluster level.
+
+Example:
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+
+metadata:
+  name: pod-reader-binding
+
+subjects:
+  - kind: User
+    name: developer
+    apiGroup: rbac.authorization.k8s.io
+
+roleRef:
+  kind: ClusterRole
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+
+This gives the developer user the permissions defined in the ClusterRole across the cluster's namespaces where those permissions apply.
+
+🔥 Role vs ClusterRole
+Role	ClusterRole
+Namespace-scoped	Cluster-scoped definition
+Used for permissions within a namespace	Can define cluster-wide or namespaced-resource permissions
+Cannot directly grant access to cluster-scoped resources	Can include cluster-scoped resources
+Example: Pods in dev namespace	Example: Nodes across cluster
+🔥 RoleBinding vs ClusterRoleBinding
+RoleBinding	ClusterRoleBinding
+Grants a Role or ClusterRole within a namespace	Grants a ClusterRole cluster-wide
+Namespace-specific binding	Cluster-wide binding
+Useful for developers working in one namespace	Useful for cluster-level administrators/operators
+Important interview point ⭐
+
+A RoleBinding can reference a ClusterRole.
+
+For example:
+
+ClusterRole
+    ↓
+RoleBinding
+    ↓
+specific namespace
+
+This means you can reuse a ClusterRole's permission definition but grant those permissions only within the namespace where the RoleBinding exists.
+
+🧩 Subjects in RBAC
+
+RBAC can grant permissions to three main types of subjects:
+
+User
+kind: User
+name: developer
+
+Represents a human user.
+
+Group
+kind: Group
+name: developers
+
+Represents a group of users.
+
+ServiceAccount
+kind: ServiceAccount
+name: backend-sa
+
+Represents an identity used by applications/Pods running inside Kubernetes.
+
+🔑 RBAC follows Least Privilege
+
+One of the most important security concepts I learned is the Principle of Least Privilege.
+
+Instead of:
+
+Developer → Full cluster admin ❌
+
+we should provide only what is required:
+
+Developer
+   ↓
+Can view Pods
+Can view Services
+Can view Deployments
+   ↓
+Cannot delete resources
+Cannot modify cluster configuration
+
+This reduces the impact of accidental or unauthorized actions.
+
+🔍 Checking RBAC Permissions
+
+Kubernetes provides:
+
+kubectl auth can-i
+
+Example:
+
+kubectl auth can-i get pods
+
+Check whether a user can delete Pods:
+
+kubectl auth can-i delete pods
+
+Check permissions in a specific namespace:
+
+kubectl auth can-i get pods -n development
+
+You can also check another user:
+
+kubectl auth can-i get pods --as=developer
+
+For example:
+
+yes
+
+means the requested action is allowed.
+
+no
+
+means it is denied.
+
+🔄 Complete RBAC Flow
+
+The whole concept can be visualized as:
+
+                    RBAC
+                     │
+                     ↓
+                 SUBJECT
+            ┌────────┼────────┐
+            ↓        ↓        ↓
+          User     Group   ServiceAccount
+                     │
+                     ↓
+                 BINDING
+              ┌──────┴──────┐
+              ↓             ↓
+        RoleBinding    ClusterRoleBinding
+              ↓             ↓
+            Role       ClusterRole
+              │             │
+              └──────┬──────┘
+                     ↓
+                Permissions
+                     ↓
+             Resource + Verb
+
+Example:
+
+developer
+    ↓
+RoleBinding
+    ↓
+Role: pod-reader
+    ↓
+Pods
+    ↓
+get / list / watch
+🚀 Real-World Example
+
+Suppose a company has:
+
+Production Namespace
+Development Namespace
+Monitoring Namespace
+
+A developer only needs to view Pods in development.
+
+Instead of giving:
+
+cluster-admin ❌
+
+we create:
+
+Role
+ ↓
+get/list/watch Pods
+ ↓
+development namespace
+
+and:
+
+RoleBinding
+ ↓
+developer
+
+Result:
+
+Developer
+   │
+   ├── development Pods → get/list/watch ✅
+   ├── production Pods  → ❌
+   ├── Nodes             → ❌
+   └── Cluster settings  → ❌
+
+This is a practical implementation of least privilege.
+
+📝 Key Takeaways
+RBAC
+│
+├── Role
+│   └── Defines namespace-scoped permissions
+│
+├── RoleBinding
+│   └── Assigns Role/ClusterRole permissions within a namespace
+│
+├── ClusterRole
+│   └── Defines cluster-scoped or reusable permissions
+│
+└── ClusterRoleBinding
+    └── Grants ClusterRole permissions cluster-wide
+🧠 Four things to remember:
+
+Role → What permissions?
+
+RoleBinding → Who gets those permissions?
+
+ClusterRole → Cluster-level/reusable permission definition
+
+ClusterRoleBinding → Who gets ClusterRole permissions cluster-wide?
+
+And the overall purpose:
+
+RBAC controls access to Kubernetes resources by associating subjects with permissions, helping enforce least privilege and improve cluster security. 🔐☸️
