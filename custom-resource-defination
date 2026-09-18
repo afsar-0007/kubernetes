@@ -1,0 +1,896 @@
+
+Today I explored **Custom Resource Definitions (CRDs)** in Kubernetes and learned how Kubernetes can be extended beyond its built-in resources.
+
+Kubernetes provides built-in resources such as `Pod`, `Deployment`, `Service`, `ConfigMap`, `Secret`, `StatefulSet`, and `Job`. However, real-world platforms often need application-specific resources that Kubernetes does not provide by default.
+
+**Custom Resource Definitions (CRDs)** solve this problem by allowing us to define our own Kubernetes resource types.
+
+---
+
+## 1. What is a CRD?
+
+**CRD stands for Custom Resource Definition.**
+
+A CRD is a Kubernetes API extension that allows us to create a **new resource type** in Kubernetes.
+
+For example, Kubernetes already understands:
+
+```text
+Pod
+Deployment
+Service
+ConfigMap
+Secret
+```
+
+But suppose we want Kubernetes to understand a custom resource called:
+
+```text
+MyApplication
+```
+
+We can create a CRD that defines what a `MyApplication` resource looks like.
+
+After creating the CRD, Kubernetes API can understand:
+
+```yaml
+kind: MyApplication
+```
+
+So conceptually:
+
+```text
+                Kubernetes API
+                       │
+              ┌────────┴────────┐
+              │                 │
+        Built-in Resources   Custom Resources
+              │                 │
+        ┌─────┼─────┐          │
+        │     │     │          │
+       Pod  Service Deployment  │
+                               │
+                         MyApplication
+                         MyDatabase
+                         MyBackup
+```
+
+---
+
+# 2. Why Do We Need CRDs?
+
+Kubernetes provides a large number of built-in resources, but they cannot represent every possible application or infrastructure concept.
+
+For example, imagine we are building a database platform.
+
+Instead of manually managing:
+
+```text
+Deployment
+Service
+PVC
+ConfigMap
+Secret
+```
+
+we might want a higher-level Kubernetes resource:
+
+```yaml
+kind: MyDatabase
+```
+
+For example:
+
+```yaml
+apiVersion: database.example.com/v1
+kind: MyDatabase
+metadata:
+  name: production-db
+spec:
+  replicas: 3
+  version: "16"
+  storage: 20Gi
+```
+
+Now Kubernetes can store this object as part of its API.
+
+A controller/operator can then watch this resource and create/manage the required underlying resources.
+
+This is one of the fundamental ideas behind the **Kubernetes Operator pattern**.
+
+---
+
+# 3. CRD vs Custom Resource
+
+One of the most important concepts I learned is the difference between a **CRD** and a **Custom Resource (CR)**.
+
+### CRD
+
+The CRD defines the **resource type/schema**.
+
+Think of it as a blueprint.
+
+```text
+CRD
+ │
+ └── Defines:
+      ├── Resource name
+      ├── API group
+      ├── Version
+      ├── Kind
+      ├── Scope
+      └── Schema
+```
+
+### Custom Resource
+
+The Custom Resource is an **actual instance** of that resource.
+
+```text
+CRD
+ │
+ └── MyDatabase
+       │
+       ├── production-db
+       ├── staging-db
+       └── development-db
+```
+
+A simple analogy:
+
+```text
+CRD = Class / Blueprint
+CR  = Object / Instance
+```
+
+---
+
+# 4. Example CRD
+
+A basic CRD can look like this:
+
+```yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+
+metadata:
+  name: myapplications.apps.example.com
+
+spec:
+  group: apps.example.com
+
+  names:
+    kind: MyApplication
+    plural: myapplications
+    singular: myapplication
+    shortNames:
+      - myapp
+
+  scope: Namespaced
+
+  versions:
+    - name: v1
+      served: true
+      storage: true
+
+      schema:
+        openAPIV3Schema:
+          type: object
+
+          properties:
+            spec:
+              type: object
+
+              properties:
+                replicas:
+                  type: integer
+
+                image:
+                  type: string
+```
+
+This tells Kubernetes:
+
+> "I want to introduce a new resource called `MyApplication` under the `apps.example.com/v1` API."
+
+---
+
+# 5. Understanding the CRD Structure
+
+## `apiVersion`
+
+```yaml
+apiVersion: apiextensions.k8s.io/v1
+```
+
+This tells Kubernetes that we are creating a **CustomResourceDefinition** using the Kubernetes API extensions API.
+
+---
+
+## `kind`
+
+```yaml
+kind: CustomResourceDefinition
+```
+
+This identifies the object being created as a CRD.
+
+---
+
+## `metadata.name`
+
+```yaml
+metadata:
+  name: myapplications.apps.example.com
+```
+
+The CRD name follows this general format:
+
+```text
+<plural>.<group>
+```
+
+For example:
+
+```text
+myapplications.apps.example.com
+```
+
+---
+
+# 6. API Group
+
+```yaml
+spec:
+  group: apps.example.com
+```
+
+The API group provides a namespace for our custom API.
+
+The resulting API path is conceptually:
+
+```text
+/apis/apps.example.com/v1
+```
+
+Using a domain-style group name is common because it helps avoid naming conflicts.
+
+---
+
+# 7. Names
+
+The `names` section defines how Kubernetes identifies the custom resource.
+
+```yaml
+names:
+  kind: MyApplication
+  plural: myapplications
+  singular: myapplication
+  shortNames:
+    - myapp
+```
+
+### Kind
+
+```yaml
+kind: MyApplication
+```
+
+Used in YAML manifests.
+
+```yaml
+kind: MyApplication
+```
+
+### Plural
+
+```yaml
+plural: myapplications
+```
+
+Used with commands such as:
+
+```bash
+kubectl get myapplications
+```
+
+### Singular
+
+```yaml
+singular: myapplication
+```
+
+Defines the singular resource name.
+
+### Short Name
+
+```yaml
+shortNames:
+  - myapp
+```
+
+Allows a shorter command:
+
+```bash
+kubectl get myapp
+```
+
+---
+
+# 8. Scope
+
+CRDs can be either:
+
+### Namespaced
+
+```yaml
+scope: Namespaced
+```
+
+Resources belong to a namespace.
+
+Example:
+
+```text
+default/myapp
+production/myapp
+development/myapp
+```
+
+### Cluster-scoped
+
+```yaml
+scope: Cluster
+```
+
+The resource does not belong to any namespace.
+
+Conceptually:
+
+```text
+Namespaced CR
+       │
+       ├── namespace-a
+       ├── namespace-b
+       └── namespace-c
+
+Cluster-scoped CR
+       │
+       └── entire cluster
+```
+
+---
+
+# 9. Versions
+
+CRDs support API versioning.
+
+Example:
+
+```yaml
+versions:
+  - name: v1
+    served: true
+    storage: true
+```
+
+### `served`
+
+```yaml
+served: true
+```
+
+Means Kubernetes serves this version through its API.
+
+### `storage`
+
+```yaml
+storage: true
+```
+
+Means this is the version used for storing the resource internally.
+
+Only one version should normally be the storage version at a time.
+
+---
+
+# 10. OpenAPI Schema
+
+One of the most important parts of a CRD is the schema.
+
+Example:
+
+```yaml
+schema:
+  openAPIV3Schema:
+    type: object
+    properties:
+      spec:
+        type: object
+        properties:
+          replicas:
+            type: integer
+          image:
+            type: string
+```
+
+The schema tells Kubernetes what fields are allowed and what data types they should have.
+
+For example:
+
+```yaml
+replicas: 3
+```
+
+is valid because:
+
+```yaml
+replicas:
+  type: integer
+```
+
+But:
+
+```yaml
+replicas: "three"
+```
+
+would not satisfy that schema.
+
+Schema validation helps prevent invalid custom resources from being accepted.
+
+---
+
+# 11. Creating the CRD
+
+Save the definition as:
+
+```text
+crd.yaml
+```
+
+Then:
+
+```bash
+kubectl apply -f crd.yaml
+```
+
+Check:
+
+```bash
+kubectl get crd
+```
+
+You should see something similar to:
+
+```text
+NAME
+myapplications.apps.example.com
+```
+
+---
+
+# 12. Inspecting a CRD
+
+We can inspect the CRD using:
+
+```bash
+kubectl describe crd myapplications.apps.example.com
+```
+
+Or:
+
+```bash
+kubectl get crd myapplications.apps.example.com -o yaml
+```
+
+This helps understand exactly how Kubernetes registered the custom API.
+
+---
+
+# 13. Creating a Custom Resource
+
+After the CRD exists, we can create an actual Custom Resource.
+
+Example:
+
+```yaml
+apiVersion: apps.example.com/v1
+kind: MyApplication
+
+metadata:
+  name: chat-app
+
+spec:
+  replicas: 3
+  image: nginx:latest
+```
+
+Save it as:
+
+```text
+myapplication.yaml
+```
+
+Then:
+
+```bash
+kubectl apply -f myapplication.yaml
+```
+
+Now Kubernetes has an object of our custom type.
+
+---
+
+# 14. Viewing the Custom Resource
+
+We can use:
+
+```bash
+kubectl get myapplications
+```
+
+or the short name:
+
+```bash
+kubectl get myapp
+```
+
+We can also use:
+
+```bash
+kubectl describe myapplication chat-app
+```
+
+And:
+
+```bash
+kubectl get myapplication chat-app -o yaml
+```
+
+---
+
+# 15. Important Concept — CRD Does NOT Automatically Create Pods
+
+This is a very important point.
+
+Creating a CRD does **not** automatically create:
+
+```text
+Pod
+Deployment
+Service
+PVC
+```
+
+For example, if we create:
+
+```yaml
+kind: MyApplication
+```
+
+Kubernetes simply knows how to store and serve that resource.
+
+Something still needs to implement the **logic** that acts on it.
+
+That logic is normally provided by a:
+
+```text
+Controller / Operator
+```
+
+---
+
+# 16. CRD + Controller / Operator
+
+The architecture can be understood as:
+
+```text
+          User
+           │
+           │ kubectl apply
+           ▼
+   ┌─────────────────┐
+   │ Custom Resource │
+   │  MyApplication  │
+   └────────┬────────┘
+            │
+            ▼
+   Kubernetes API Server
+            │
+            │ watches
+            ▼
+   ┌─────────────────┐
+   │   Controller /   │
+   │    Operator      │
+   └────────┬────────┘
+            │
+            ▼
+    ┌───────┼────────┐
+    │       │        │
+    ▼       ▼        ▼
+ Deployment Service  PVC
+    │
+    ▼
+   Pods
+```
+
+The controller continuously observes the desired state and works toward making the actual cluster state match it.
+
+---
+
+# 17. Desired State vs Actual State
+
+CRDs fit into Kubernetes' declarative model.
+
+For example:
+
+```yaml
+spec:
+  replicas: 3
+```
+
+represents the desired state.
+
+The controller/operator can observe the current state.
+
+If only two replicas are available:
+
+```text
+Desired = 3
+Actual  = 2
+```
+
+The controller can take action to reconcile the difference.
+
+```text
+Desired State
+     │
+     ▼
+Custom Resource
+     │
+     ▼
+Controller
+     │
+     ▼
+Actual Cluster State
+```
+
+This is called **reconciliation**.
+
+---
+
+# 18. CRD and Kubernetes Operators
+
+CRDs are heavily used by Kubernetes Operators.
+
+An Operator generally combines:
+
+```text
+CRD + Controller + Domain-specific logic
+```
+
+For example, a database operator could introduce:
+
+```yaml
+kind: PostgreSQL
+```
+
+Then users could define:
+
+```yaml
+apiVersion: database.example.com/v1
+kind: PostgreSQL
+
+metadata:
+  name: production-db
+
+spec:
+  replicas: 3
+  storage: 50Gi
+```
+
+The operator could then manage the underlying Kubernetes resources required for that database.
+
+This allows complex operational knowledge to be automated through the Kubernetes API.
+
+---
+
+# 19. Built-in Resource vs Custom Resource
+
+| Feature                | Built-in Resource                | Custom Resource                           |
+| ---------------------- | -------------------------------- | ----------------------------------------- |
+| Provided by Kubernetes | Yes                              | No                                        |
+| Example                | Pod                              | MyDatabase                                |
+| API                    | Built-in Kubernetes API          | User-defined API                          |
+| Definition             | Already exists                   | Defined using CRD                         |
+| Controller             | Kubernetes controllers           | Usually custom controller/operator        |
+| Use case               | General Kubernetes functionality | Application/domain-specific functionality |
+
+---
+
+# 20. Useful Commands
+
+### List CRDs
+
+```bash
+kubectl get crd
+```
+
+### Get a specific CRD
+
+```bash
+kubectl get crd myapplications.apps.example.com
+```
+
+### Describe CRD
+
+```bash
+kubectl describe crd myapplications.apps.example.com
+```
+
+### Get CRD YAML
+
+```bash
+kubectl get crd myapplications.apps.example.com -o yaml
+```
+
+### List Custom Resources
+
+```bash
+kubectl get myapplications
+```
+
+### Get all resources of a custom type
+
+```bash
+kubectl get myapplications -A
+```
+
+### Describe Custom Resource
+
+```bash
+kubectl describe myapplication chat-app
+```
+
+### Delete Custom Resource
+
+```bash
+kubectl delete myapplication chat-app
+```
+
+### Delete CRD
+
+```bash
+kubectl delete crd myapplications.apps.example.com
+```
+
+Deleting a CRD should be done carefully because it also affects the custom resources associated with that definition.
+
+---
+
+# 21. CRD vs CR vs Controller
+
+This distinction is extremely important:
+
+```text
+┌───────────────────────────────┐
+│ CRD                           │
+│ Defines the resource type     │
+└───────────────┬───────────────┘
+                │
+                ▼
+┌───────────────────────────────┐
+│ Custom Resource (CR)          │
+│ Actual instance/data          │
+└───────────────┬───────────────┘
+                │
+                │ watched by
+                ▼
+┌───────────────────────────────┐
+│ Controller / Operator         │
+│ Implements business logic     │
+└───────────────┬───────────────┘
+                │
+                ▼
+      Kubernetes Resources
+       ├── Deployment
+       ├── Service
+       ├── PVC
+       ├── Secret
+       └── Pods
+```
+
+### In one line:
+
+**CRD defines → CR represents → Controller reconciles.**
+
+---
+
+# 22. Key Things I Learned
+
+Through CRDs, I learned that Kubernetes is not limited to the resources provided out of the box.
+
+CRDs allow Kubernetes to become an **extensible platform** where organizations can define resources that represent their own applications, databases, infrastructure, and operational workflows.
+
+The most important concepts I covered were:
+
+* Custom Resource Definition
+* Custom Resource
+* API Groups
+* API Versions
+* Kind
+* Plural / Singular / Short Names
+* Namespaced vs Cluster-scoped resources
+* OpenAPI v3 schema
+* Schema validation
+* Served vs Storage versions
+* Custom Controllers
+* Operators
+* Desired State
+* Reconciliation
+* Kubernetes API extensibility
+
+---
+
+# 🎯 Final Takeaway
+
+The key concept I took away from CRDs is:
+
+> **Kubernetes can be extended to understand new types of resources, while controllers/operators provide the logic required to act on those resources.**
+
+CRDs are therefore an important foundation for understanding **Kubernetes Operators, controllers, platform engineering, and advanced Kubernetes automation**.
+
+---
+
+## 📈 My Kubernetes Learning Journey
+
+```text
+Kubernetes Architecture
+        ↓
+Pods
+        ↓
+Deployments
+        ↓
+ReplicaSets
+        ↓
+Services
+        ↓
+Ingress
+        ↓
+ConfigMaps & Secrets
+        ↓
+Jobs & CronJobs
+        ↓
+PV / PVC / StorageClass
+        ↓
+StatefulSet / DaemonSet
+        ↓
+HPA / VPA
+        ↓
+Probes
+        ↓
+Taints & Tolerations
+        ↓
+Node Affinity
+        ↓
+ResourceQuota & Limits
+        ↓
+RBAC
+        ↓
+NetworkPolicy
+        ↓
+Pod Security Standards
+        ↓
+Custom Resource Definitions (CRDs) ✅
+        ↓
+Helm 🚀
+        ↓
+Argo CD
+        ↓
+Advanced DevOps / GitOps
+```
+
+**Day's Focus:** Kubernetes CRDs
+**Category:** Kubernetes / Advanced Concepts
+**Status:** ✅ Completed
