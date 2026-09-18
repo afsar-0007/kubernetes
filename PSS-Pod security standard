@@ -1,0 +1,1243 @@
+
+
+Today I learned about **Pod Security Standards (PSS)** in Kubernetes and how they are used to define and enforce security requirements for Pods.
+
+Pod Security Standards provide a set of security policies that help prevent Pods from running with unnecessarily dangerous configurations.
+
+The main goal is to reduce the **security attack surface** of Kubernetes workloads by restricting potentially risky Pod configurations such as privileged containers, host namespace access, host filesystem mounts, unsafe Linux capabilities, and running containers as root.
+
+---
+
+# 1. What are Pod Security Standards?
+
+**Pod Security Standards (PSS)** are a set of security standards defined by Kubernetes that describe different levels of security for Pods.
+
+They define what a Pod is allowed or not allowed to do from a security perspective.
+
+For example, a highly privileged Pod could potentially:
+
+```text
+Access host filesystem
+       ↓
+Use host namespaces
+       ↓
+Gain additional Linux capabilities
+       ↓
+Interact with host devices
+       ↓
+Increase impact of a container compromise
+```
+
+PSS helps prevent or restrict such configurations.
+
+---
+
+# 2. Why Do We Need PSS?
+
+Containers provide process isolation, but a poorly configured container can have unnecessary privileges.
+
+For example:
+
+```yaml
+securityContext:
+  privileged: true
+```
+
+A privileged container has significantly more access to the underlying host than a normal container.
+
+Similarly, configurations such as:
+
+```yaml
+hostNetwork: true
+hostPID: true
+hostPath:
+```
+
+can increase the potential impact of a compromised workload.
+
+PSS provides standardized security requirements that Kubernetes administrators can apply to workloads.
+
+---
+
+# 3. PSS Has Three Levels
+
+Kubernetes defines three Pod Security Standards levels:
+
+```text
+                    Pod Security Standards
+                            │
+              ┌─────────────┼─────────────┐
+              │             │             │
+           Privileged    Baseline      Restricted
+```
+
+They are:
+
+### 1. Privileged
+
+Minimal restrictions.
+
+### 2. Baseline
+
+Prevents known privilege-escalation and common security risks.
+
+### 3. Restricted
+
+A strongly restricted security profile following current Pod hardening best practices.
+
+---
+
+# 4. Privileged
+
+The **Privileged** profile is essentially unrestricted.
+
+It is intended for workloads that require elevated privileges.
+
+Examples can include certain:
+
+* Infrastructure components
+* System-level workloads
+* Monitoring/security agents
+* Networking components
+* Node-level tools
+
+Conceptually:
+
+```text
+Privileged
+    │
+    ├── Very few restrictions
+    ├── Allows advanced host interaction
+    └── Higher security risk
+```
+
+This profile should be used only when the workload genuinely requires such capabilities.
+
+---
+
+# 5. Baseline
+
+The **Baseline** profile prevents many known privilege escalation mechanisms while still allowing a broader range of workloads than Restricted.
+
+It restricts dangerous configurations such as certain:
+
+* Linux capabilities
+* Host namespace usage
+* Privileged containers
+* Host filesystem access
+* Unsafe security settings
+
+Conceptually:
+
+```text
+Baseline
+    │
+    ├── Blocks common dangerous configurations
+    ├── More secure than Privileged
+    └── More flexible than Restricted
+```
+
+Baseline is often a practical starting point for workloads that cannot immediately meet the stricter Restricted requirements.
+
+---
+
+# 6. Restricted
+
+The **Restricted** profile applies stronger security requirements.
+
+It is designed for workloads that can run with a highly constrained security configuration.
+
+Typical requirements include:
+
+* Running as non-root
+* Preventing privilege escalation
+* Restricting Linux capabilities
+* Using a seccomp profile
+* Avoiding privileged containers
+* Avoiding host namespace access
+* Restricting unsafe volume types
+* Using safer security contexts
+
+Conceptually:
+
+```text
+Restricted
+     │
+     ├── Non-root
+     ├── No privilege escalation
+     ├── Minimal capabilities
+     ├── Seccomp
+     ├── No privileged containers
+     └── Strong workload isolation
+```
+
+---
+
+# 7. Privileged vs Baseline vs Restricted
+
+| Profile    | Restrictions | Typical Use                  |
+| ---------- | ------------ | ---------------------------- |
+| Privileged | Minimal      | Trusted/system workloads     |
+| Baseline   | Moderate     | General workloads            |
+| Restricted | Strong       | Security-sensitive workloads |
+
+Think of them as:
+
+```text
+Security
+  ▲
+  │
+  │        Restricted
+  │           ▲
+  │           │
+  │        Baseline
+  │           ▲
+  │           │
+  │        Privileged
+  └──────────────────► Flexibility
+```
+
+The important point is that these profiles represent **security requirements**, not performance levels.
+
+---
+
+# 8. PSS vs PSA
+
+One of the most important distinctions is:
+
+```text
+PSS = Pod Security Standards
+PSA = Pod Security Admission
+```
+
+### PSS
+
+Defines **what secure Pod configurations should look like**.
+
+### PSA
+
+Is the Kubernetes **admission controller** that can enforce PSS policies.
+
+So:
+
+```text
+PSS
+ │
+ │ defines security requirements
+ ▼
+PSA
+ │
+ │ evaluates incoming Pods
+ ▼
+Allow / Warn / Audit / Reject
+```
+
+---
+
+# 9. Pod Security Admission (PSA)
+
+**Pod Security Admission** is a built-in Kubernetes admission controller that can enforce Pod Security Standards.
+
+It works at the **namespace level**.
+
+We can label a namespace to specify the desired Pod Security level.
+
+For example:
+
+```yaml
+pod-security.kubernetes.io/enforce: restricted
+```
+
+This tells Kubernetes:
+
+> Enforce the Restricted Pod Security Standard for Pods in this namespace.
+
+---
+
+# 10. PSA Modes
+
+Pod Security Admission supports three modes:
+
+```text
+enforce
+audit
+warn
+```
+
+These modes have different purposes.
+
+---
+
+## `enforce`
+
+```yaml
+pod-security.kubernetes.io/enforce: restricted
+```
+
+If a Pod violates the selected policy:
+
+```text
+Pod
+ ↓
+PSA
+ ↓
+Violation
+ ↓
+Rejected ❌
+```
+
+The Pod is not admitted.
+
+---
+
+## `audit`
+
+```yaml
+pod-security.kubernetes.io/audit: restricted
+```
+
+Violations are recorded in the audit information, but the Pod is not rejected solely because of the audit policy.
+
+Useful when evaluating an existing environment before enforcing restrictions.
+
+---
+
+## `warn`
+
+```yaml
+pod-security.kubernetes.io/warn: restricted
+```
+
+The user receives a warning when creating or updating a violating Pod, but the Pod is not rejected solely because of the warning policy.
+
+Useful for gradual adoption.
+
+---
+
+# 11. PSA Modes Together
+
+We can use all three:
+
+```yaml
+metadata:
+  labels:
+
+    pod-security.kubernetes.io/enforce: restricted
+
+    pod-security.kubernetes.io/audit: restricted
+
+    pod-security.kubernetes.io/warn: restricted
+```
+
+Conceptually:
+
+```text
+              Pod
+               │
+               ▼
+       Pod Security Admission
+               │
+      ┌────────┼─────────┐
+      ▼        ▼         ▼
+   Enforce    Audit     Warn
+      │        │         │
+    Reject    Record    Warning
+```
+
+---
+
+# 12. Applying PSS to a Namespace
+
+Create a namespace:
+
+```yaml
+apiVersion: v1
+kind: Namespace
+
+metadata:
+  name: secure-app
+
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+```
+
+Apply:
+
+```bash
+kubectl apply -f namespace.yaml
+```
+
+Now Pods created in that namespace are evaluated according to the configured Pod Security Admission labels.
+
+---
+
+# 13. Example of an Insecure Pod
+
+Consider:
+
+```yaml
+apiVersion: v1
+kind: Pod
+
+metadata:
+  name: insecure-pod
+
+spec:
+  containers:
+    - name: nginx
+      image: nginx
+
+      securityContext:
+        privileged: true
+```
+
+The problem is:
+
+```yaml
+privileged: true
+```
+
+This gives the container elevated privileges and is not compatible with the Restricted profile.
+
+If the namespace enforces Restricted PSS, the Pod can be rejected.
+
+---
+
+# 14. Secure Pod Example
+
+A Pod designed for the Restricted profile can look like:
+
+```yaml
+apiVersion: v1
+kind: Pod
+
+metadata:
+  name: secure-pod
+
+spec:
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+
+  containers:
+    - name: nginx
+      image: nginx:latest
+
+      securityContext:
+        allowPrivilegeEscalation: false
+
+        capabilities:
+          drop:
+            - ALL
+```
+
+Important security settings include:
+
+```text
+runAsNonRoot: true
+        ↓
+Container should not run as root
+
+allowPrivilegeEscalation: false
+        ↓
+Prevent gaining additional privileges
+
+capabilities:
+  drop:
+    - ALL
+        ↓
+Remove unnecessary Linux capabilities
+
+seccompProfile:
+  type: RuntimeDefault
+        ↓
+Use the runtime's default seccomp restrictions
+```
+
+The exact requirements can vary by Kubernetes version and PSS revision, so the cluster's current Kubernetes documentation should be used when implementing production policies.
+
+---
+
+# 15. `runAsNonRoot`
+
+Running containers as a non-root user is an important container security practice.
+
+Example:
+
+```yaml
+securityContext:
+  runAsNonRoot: true
+```
+
+This tells Kubernetes that the container should run without root privileges.
+
+A stronger configuration can specify a UID:
+
+```yaml
+securityContext:
+  runAsUser: 1000
+  runAsNonRoot: true
+```
+
+Conceptually:
+
+```text
+Root
+ UID 0
+   │
+   ▼
+Higher privileges
+
+Non-root
+ UID 1000
+   │
+   ▼
+Reduced privileges
+```
+
+Running as non-root reduces the impact of certain container compromises.
+
+---
+
+# 16. `allowPrivilegeEscalation`
+
+Example:
+
+```yaml
+securityContext:
+  allowPrivilegeEscalation: false
+```
+
+This prevents a process from gaining more privileges than its parent process through mechanisms supported by the kernel.
+
+For security-sensitive workloads, disabling privilege escalation is an important hardening measure.
+
+---
+
+# 17. Linux Capabilities
+
+Linux capabilities divide traditional root privileges into smaller units.
+
+Instead of giving a process broad root privileges, specific capabilities can be granted.
+
+For example:
+
+```text
+NET_ADMIN
+NET_RAW
+SYS_ADMIN
+CHOWN
+SETUID
+```
+
+A secure workload should generally have only the capabilities it actually needs.
+
+For example:
+
+```yaml
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+```
+
+Then, if a specific capability is genuinely required, it can be added explicitly.
+
+---
+
+# 18. Seccomp
+
+**Seccomp** stands for **Secure Computing**.
+
+It can restrict which Linux system calls a process is allowed to make.
+
+Example:
+
+```yaml
+securityContext:
+  seccompProfile:
+    type: RuntimeDefault
+```
+
+Conceptually:
+
+```text
+Application
+     │
+     │ system calls
+     ▼
+   Seccomp
+     │
+ ┌───┴────┐
+ ▼        ▼
+Allowed  Blocked
+calls    calls
+```
+
+This reduces the kernel attack surface available to a container.
+
+---
+
+# 19. Host Namespace Security
+
+Containers can potentially request access to host namespaces.
+
+Examples:
+
+```yaml
+hostNetwork: true
+hostPID: true
+hostIPC: true
+```
+
+These can weaken workload isolation.
+
+For example:
+
+```text
+Pod
+ │
+ ├── hostNetwork
+ │       ↓
+ │   Uses host network namespace
+ │
+ ├── hostPID
+ │       ↓
+ │   Can interact with host PID namespace
+ │
+ └── hostIPC
+         ↓
+     Uses host IPC namespace
+```
+
+Restricted security policies prevent unsafe host namespace configurations.
+
+---
+
+# 20. HostPath and Host Filesystem
+
+A Pod can potentially mount directories from the host using `hostPath`.
+
+Example:
+
+```yaml
+volumes:
+  - name: host-data
+    hostPath:
+      path: /var/lib
+```
+
+This creates a potentially dangerous relationship between the Pod and node filesystem.
+
+A compromised workload with inappropriate host filesystem access can potentially affect the node.
+
+Therefore, strong Pod security profiles restrict unsafe host filesystem access.
+
+---
+
+# 21. PSS and SecurityContext
+
+PSS is closely related to Kubernetes `securityContext`.
+
+SecurityContext provides the actual security configuration for Pods and containers.
+
+Important fields include:
+
+```yaml
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+
+  capabilities:
+    drop:
+      - ALL
+
+  seccompProfile:
+    type: RuntimeDefault
+```
+
+Conceptually:
+
+```text
+Pod Security Standards
+          │
+          ▼
+ Security Requirements
+          │
+          ▼
+    SecurityContext
+          │
+          ▼
+ Container Runtime
+```
+
+---
+
+# 22. Pod-Level vs Container-Level SecurityContext
+
+SecurityContext can be specified at two levels.
+
+### Pod level
+
+```yaml
+spec:
+  securityContext:
+    runAsNonRoot: true
+```
+
+Applies at the Pod level.
+
+### Container level
+
+```yaml
+containers:
+  - name: app
+    securityContext:
+      allowPrivilegeEscalation: false
+```
+
+Applies to that container.
+
+Conceptually:
+
+```text
+Pod
+ │
+ ├── Pod SecurityContext
+ │
+ ├── Container A
+ │     └── Container SecurityContext
+ │
+ └── Container B
+       └── Container SecurityContext
+```
+
+---
+
+# 23. PSS Does Not Replace All Kubernetes Security
+
+PSS is only one part of Kubernetes security.
+
+A secure Kubernetes environment may combine:
+
+```text
+RBAC
+ │
+ ├── Who can access Kubernetes API?
+ │
+NetworkPolicy
+ │
+ ├── Who can communicate with Pods?
+ │
+PSS / PSA
+ │
+ ├── What security configurations can Pods use?
+ │
+Secrets
+ │
+ ├── How are sensitive values handled?
+ │
+SecurityContext
+ │
+ ├── How does the container run?
+ │
+Image Security
+ │
+ ├── What software is inside the image?
+ │
+Admission Controls
+ │
+ └── What configurations are allowed?
+```
+
+These controls solve different security problems.
+
+---
+
+# 24. PSS vs NetworkPolicy vs RBAC
+
+This distinction is important for interviews.
+
+| Security Mechanism | Controls                                      |
+| ------------------ | --------------------------------------------- |
+| RBAC               | Who can perform Kubernetes API actions        |
+| NetworkPolicy      | Which Pods can communicate                    |
+| PSS / PSA          | Which Pod security configurations are allowed |
+| SecurityContext    | How a container/process runs                  |
+| Secrets            | Sensitive configuration/data                  |
+| Image scanning     | Vulnerabilities in container images           |
+
+Simple memory trick:
+
+```text
+RBAC
+"What can YOU do?"
+
+NetworkPolicy
+"Who can TALK to whom?"
+
+PSS
+"What can your POD be configured to do?"
+
+SecurityContext
+"How does the CONTAINER run?"
+```
+
+---
+
+# 25. Gradual PSS Adoption
+
+For an existing production cluster, immediately enforcing Restricted may break existing workloads.
+
+A safer migration approach is:
+
+```text
+Existing Namespace
+        │
+        ▼
+      WARN
+        │
+        ▼
+      AUDIT
+        │
+        ▼
+Fix workloads
+        │
+        ▼
+    ENFORCE
+```
+
+For example:
+
+```yaml
+pod-security.kubernetes.io/warn: restricted
+```
+
+First identify violations.
+
+Then:
+
+```yaml
+pod-security.kubernetes.io/audit: restricted
+```
+
+Track violations.
+
+After workloads are remediated:
+
+```yaml
+pod-security.kubernetes.io/enforce: restricted
+```
+
+This is useful for adopting security controls without unexpectedly breaking applications.
+
+---
+
+# 26. Checking Namespace PSS Configuration
+
+List namespaces:
+
+```bash
+kubectl get namespaces --show-labels
+```
+
+Inspect one namespace:
+
+```bash
+kubectl get namespace secure-app --show-labels
+```
+
+You can also inspect:
+
+```bash
+kubectl get namespace secure-app -o yaml
+```
+
+Look for:
+
+```yaml
+labels:
+  pod-security.kubernetes.io/enforce: restricted
+```
+
+---
+
+# 27. Testing PSS
+
+Create a namespace:
+
+```bash
+kubectl create namespace secure-app
+```
+
+Apply Restricted enforcement:
+
+```bash
+kubectl label namespace secure-app \
+  pod-security.kubernetes.io/enforce=restricted
+```
+
+Now try creating a Pod with an insecure configuration.
+
+For example:
+
+```yaml
+securityContext:
+  privileged: true
+```
+
+Kubernetes should reject it under Restricted enforcement.
+
+Then modify the workload to use safer settings.
+
+---
+
+# 28. PSS Security Flow
+
+The complete flow can be visualized as:
+
+```text
+Developer
+    │
+    │ kubectl apply
+    ▼
+Pod Manifest
+    │
+    ▼
+API Server
+    │
+    ▼
+Pod Security Admission
+    │
+    ├───────────────┐
+    │               │
+    ▼               ▼
+ PSS Policy      Pod Config
+    │               │
+    └───────┬───────┘
+            ▼
+       Validation
+            │
+      ┌─────┼─────┐
+      ▼     ▼     ▼
+    Allow  Warn  Reject
+```
+
+---
+
+# 29. Important Security Principle — Least Privilege
+
+PSS aligns closely with the **principle of least privilege**.
+
+The idea is:
+
+> Give a workload only the privileges and access it actually requires.
+
+Instead of:
+
+```text
+Pod
+ │
+ ├── privileged
+ ├── root
+ ├── hostNetwork
+ ├── hostPID
+ ├── all capabilities
+ └── unrestricted access
+```
+
+we want:
+
+```text
+Pod
+ │
+ ├── non-root
+ ├── no privilege escalation
+ ├── minimal capabilities
+ ├── seccomp
+ └── restricted host access
+```
+
+This reduces the potential impact of a compromised container.
+
+---
+
+# 30. Common PSS/PSA Problems
+
+### Problem 1 — Pod runs as root
+
+```text
+runAsNonRoot requirement violated
+```
+
+Fix by configuring:
+
+```yaml
+runAsNonRoot: true
+```
+
+and ensuring the image supports non-root execution.
+
+---
+
+### Problem 2 — Privileged container
+
+```yaml
+privileged: true
+```
+
+Restricted policies reject this.
+
+Remove it unless genuinely required.
+
+---
+
+### Problem 3 — Privilege escalation enabled
+
+Fix:
+
+```yaml
+allowPrivilegeEscalation: false
+```
+
+---
+
+### Problem 4 — Missing seccomp
+
+Use:
+
+```yaml
+seccompProfile:
+  type: RuntimeDefault
+```
+
+when required by the selected PSS level.
+
+---
+
+### Problem 5 — Existing workloads break after enforcement
+
+Possible reason:
+
+```text
+Namespace
+   │
+   ▼
+enforce=restricted
+   │
+   ▼
+Existing workload violates Restricted
+   │
+   ▼
+Pod creation/update rejected
+```
+
+Use `warn` and `audit` to identify violations before enforcement.
+
+---
+
+# 31. Important Commands
+
+### Check namespaces
+
+```bash
+kubectl get ns
+```
+
+### Show namespace labels
+
+```bash
+kubectl get ns --show-labels
+```
+
+### Label namespace for Restricted enforcement
+
+```bash
+kubectl label ns secure-app \
+  pod-security.kubernetes.io/enforce=restricted
+```
+
+### Add warning mode
+
+```bash
+kubectl label ns secure-app \
+  pod-security.kubernetes.io/warn=restricted
+```
+
+### Add audit mode
+
+```bash
+kubectl label ns secure-app \
+  pod-security.kubernetes.io/audit=restricted
+```
+
+### Inspect namespace
+
+```bash
+kubectl describe ns secure-app
+```
+
+---
+
+# 32. PSS Best-Practice Mindset
+
+When deploying a workload, I should ask:
+
+```text
+1. Does it need root?
+        ↓
+     Prefer NO
+
+2. Does it need privileged mode?
+        ↓
+     Prefer NO
+
+3. Does it need privilege escalation?
+        ↓
+     Prefer NO
+
+4. Does it need Linux capabilities?
+        ↓
+     Drop ALL, add only required ones
+
+5. Does it need host namespaces?
+        ↓
+     Prefer NO
+
+6. Does it need host filesystem access?
+        ↓
+     Prefer NO
+
+7. Is seccomp configured?
+        ↓
+     Use RuntimeDefault or a stricter profile
+```
+
+This mindset helps build more secure Kubernetes workloads.
+
+---
+
+# 33. Key Concepts I Learned
+
+Today I covered:
+
+* Pod Security Standards (PSS)
+* Privileged profile
+* Baseline profile
+* Restricted profile
+* Pod Security Admission (PSA)
+* `enforce`
+* `audit`
+* `warn`
+* Namespace-level enforcement
+* SecurityContext
+* `runAsNonRoot`
+* `runAsUser`
+* `allowPrivilegeEscalation`
+* Linux capabilities
+* Seccomp
+* Host namespaces
+* Host filesystem access
+* Least privilege
+* Gradual security-policy adoption
+* PSS vs RBAC
+* PSS vs NetworkPolicy
+* PSS and container hardening
+* PSS troubleshooting
+
+---
+
+# 🎯 Final Takeaway
+
+The most important thing I learned about Pod Security Standards is:
+
+> **PSS defines security requirements for Pods, while Pod Security Admission (PSA) can apply those requirements to namespaces using `enforce`, `audit`, and `warn` modes.**
+
+The three profiles are:
+
+```text
+Privileged
+    ↓
+Minimal restrictions
+
+Baseline
+    ↓
+Blocks common privilege-escalation risks
+
+Restricted
+    ↓
+Strong workload hardening
+```
+
+And the overall Kubernetes security model can be thought of as:
+
+```text
+                Kubernetes Security
+                       │
+       ┌───────────────┼────────────────┐
+       │               │                │
+      RBAC       NetworkPolicy       PSS/PSA
+       │               │                │
+   API access      Network access   Pod security
+       │               │                │
+       └───────────────┼────────────────┘
+                       │
+                       ▼
+              Defense in Depth
+```
+
+PSS is an important Kubernetes security concept because it helps organizations enforce safer workload configurations and reduce the privileges available to potentially compromised containers.
+
+---
+
+## 📈 My Kubernetes Learning Journey
+
+```text
+Kubernetes Architecture
+        ↓
+Pods
+        ↓
+Deployments
+        ↓
+Services
+        ↓
+Ingress
+        ↓
+ConfigMaps & Secrets
+        ↓
+Storage
+        ↓
+StatefulSet / DaemonSet
+        ↓
+HPA / VPA
+        ↓
+Probes
+        ↓
+Taints & Tolerations
+        ↓
+Node Affinity
+        ↓
+ResourceQuota & Limits
+        ↓
+RBAC
+        ↓
+NetworkPolicy
+        ↓
+Pod Security Standards (PSS) ✅
+        ↓
+Custom Resource Definitions (CRD) ✅
+        ↓
+Helm 🚀
+        ↓
+Argo CD
+        ↓
+GitOps
+```
+
+**Day's Focus:** Kubernetes Pod Security Standards (PSS)
+**Category:** Kubernetes Security
+**Status:** ✅ Completed
