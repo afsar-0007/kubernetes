@@ -1,0 +1,1152 @@
+# 🚀 Daily DevOps Learning — Kubernetes Network Policies
+
+Today I learned about **Network Policies in Kubernetes** and how they can be used to control network communication between Pods.
+
+By default, Kubernetes networking generally allows Pods to communicate with each other without application-level network restrictions. **NetworkPolicy** provides a way to define rules that control which traffic is allowed to reach or leave selected Pods.
+
+NetworkPolicy is therefore an important Kubernetes **network security** concept, especially when implementing **network segmentation** and **least-privilege networking**.
+
+---
+
+# 1. What is a NetworkPolicy?
+
+A **NetworkPolicy** is a Kubernetes API object used to control network traffic to and from Pods.
+
+It can define:
+
+* Which Pods can communicate with a Pod
+* Which namespaces can communicate with a Pod
+* Which IP addresses/CIDRs can communicate with a Pod
+* Which ports are allowed
+* Whether the policy controls **Ingress**, **Egress**, or both
+
+Conceptually:
+
+```text
+                Kubernetes Cluster
+ ┌─────────────────────────────────────────┐
+ │                                         │
+ │   Frontend Pods                         │
+ │       │                                 │
+ │       │ HTTP :3000                      │
+ │       ▼                                 │
+ │   Backend Pods                          │
+ │       │                                 │
+ │       │ MongoDB :27017                  │
+ │       ▼                                 │
+ │   MongoDB Pods                          │
+ │                                         │
+ └─────────────────────────────────────────┘
+
+             NetworkPolicy
+                   │
+                   ▼
+        Controls who can communicate
+```
+
+---
+
+# 2. Why Do We Need NetworkPolicy?
+
+Suppose we have a three-tier application:
+
+```text
+Internet
+   │
+   ▼
+Frontend
+   │
+   ▼
+Backend
+   │
+   ▼
+Database
+```
+
+Without appropriate network restrictions, another Pod in the cluster may potentially attempt to connect directly to the database.
+
+For example:
+
+```text
+Frontend ──────► Backend ──────► MongoDB
+                                   ▲
+                                   │
+                         Other Pod ─┘
+```
+
+Ideally, MongoDB should only accept traffic from the backend.
+
+We can use NetworkPolicy to express this requirement:
+
+```text
+Backend ──────► MongoDB     ✅
+Frontend ─────► MongoDB     ❌
+Other Pod ────► MongoDB     ❌
+```
+
+This follows the security principle of **least privilege**:
+
+> Allow only the network communication that is actually required.
+
+---
+
+# 3. Important: NetworkPolicy Works at Pod Level
+
+NetworkPolicies select **Pods**, not Services directly.
+
+For example:
+
+```yaml
+podSelector:
+  matchLabels:
+    app: backend
+```
+
+This selects Pods having:
+
+```yaml
+labels:
+  app: backend
+```
+
+The policy then controls traffic involving those selected Pods.
+
+---
+
+# 4. NetworkPolicy Components
+
+A typical NetworkPolicy contains:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+
+metadata:
+  name: backend-policy
+
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    ...
+
+  egress:
+    ...
+```
+
+The important components are:
+
+```text
+NetworkPolicy
+│
+├── podSelector
+│
+├── policyTypes
+│
+├── ingress
+│   ├── from
+│   └── ports
+│
+└── egress
+    ├── to
+    └── ports
+```
+
+---
+
+# 5. `podSelector`
+
+`podSelector` determines **which Pods the policy applies to**.
+
+Example:
+
+```yaml
+podSelector:
+  matchLabels:
+    app: backend
+```
+
+Suppose we have:
+
+```yaml
+labels:
+  app: backend
+```
+
+Those Pods become the policy's target.
+
+Important:
+
+```text
+podSelector = "Which Pods are protected by this policy?"
+```
+
+---
+
+# 6. Ingress
+
+**Ingress means incoming traffic.**
+
+For example:
+
+```text
+Frontend
+   │
+   │ incoming request
+   ▼
+Backend Pod
+```
+
+The traffic entering the backend is **Ingress traffic**.
+
+A policy can specify:
+
+```yaml
+ingress:
+  - from:
+      - podSelector:
+          matchLabels:
+            app: frontend
+```
+
+This means:
+
+> Allow traffic coming from Pods labeled `app=frontend`.
+
+---
+
+# 7. Egress
+
+**Egress means outgoing traffic.**
+
+For example:
+
+```text
+Backend Pod
+    │
+    │ outgoing request
+    ▼
+MongoDB Pod
+```
+
+The connection leaving the backend is **Egress traffic**.
+
+Example:
+
+```yaml
+egress:
+  - to:
+      - podSelector:
+          matchLabels:
+            app: mongodb
+```
+
+This means:
+
+> Allow traffic from the selected Pod to Pods labeled `app=mongodb`.
+
+---
+
+# 8. Ingress vs Egress
+
+```text
+                 Incoming
+                    ↓
+             ┌─────────────┐
+             │ Backend Pod  │
+             └─────────────┘
+                    ↓
+                 Outgoing
+```
+
+| Type    | Controls         | Example            |
+| ------- | ---------------- | ------------------ |
+| Ingress | Incoming traffic | Frontend → Backend |
+| Egress  | Outgoing traffic | Backend → MongoDB  |
+
+Easy way to remember:
+
+```text
+Ingress = traffic IN
+Egress  = traffic OUT
+```
+
+---
+
+# 9. `policyTypes`
+
+`policyTypes` tells Kubernetes which direction the policy governs.
+
+Example:
+
+```yaml
+policyTypes:
+  - Ingress
+```
+
+Only ingress is explicitly governed by this policy.
+
+For both:
+
+```yaml
+policyTypes:
+  - Ingress
+  - Egress
+```
+
+For egress only:
+
+```yaml
+policyTypes:
+  - Egress
+```
+
+---
+
+# 10. `from` and `to`
+
+For ingress:
+
+```yaml
+from:
+```
+
+defines where traffic can come **from**.
+
+For egress:
+
+```yaml
+to:
+```
+
+defines where traffic can go **to**.
+
+Example:
+
+```yaml
+ingress:
+  - from:
+      - podSelector:
+          matchLabels:
+            app: frontend
+```
+
+Example:
+
+```yaml
+egress:
+  - to:
+      - podSelector:
+          matchLabels:
+            app: mongodb
+```
+
+---
+
+# 11. `ports`
+
+NetworkPolicy can restrict traffic by port.
+
+Example:
+
+```yaml
+ports:
+  - protocol: TCP
+    port: 8080
+```
+
+This allows TCP traffic on port `8080`.
+
+Multiple ports can be specified:
+
+```yaml
+ports:
+  - protocol: TCP
+    port: 8080
+
+  - protocol: TCP
+    port: 8443
+```
+
+---
+
+# 12. Basic NetworkPolicy Example
+
+Suppose we have:
+
+```text
+Frontend
+   │
+   │ TCP 8080
+   ▼
+Backend
+```
+
+We want only frontend Pods to access backend Pods on port `8080`.
+
+NetworkPolicy:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+
+metadata:
+  name: backend-ingress
+
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+
+  policyTypes:
+    - Ingress
+
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend
+
+      ports:
+        - protocol: TCP
+          port: 8080
+```
+
+Meaning:
+
+```text
+Policy applies to:
+    app=backend
+
+Allowed source:
+    app=frontend
+
+Allowed port:
+    TCP 8080
+```
+
+Conceptually:
+
+```text
+Frontend Pod
+app=frontend
+     │
+     │ TCP 8080
+     ▼
+Backend Pod
+app=backend
+
+       ✅ ALLOWED
+```
+
+But:
+
+```text
+Other Pod
+    │
+    │ TCP 8080
+    ▼
+Backend Pod
+
+       ❌ NOT ALLOWED
+```
+
+---
+
+# 13. Namespace Selector
+
+NetworkPolicy can also select Pods based on their namespace.
+
+Example:
+
+```yaml
+from:
+  - namespaceSelector:
+      matchLabels:
+        environment: production
+```
+
+This means traffic can come from Pods in namespaces matching:
+
+```text
+environment=production
+```
+
+This is useful when applications are separated by namespaces.
+
+---
+
+# 14. PodSelector + NamespaceSelector
+
+We can combine:
+
+```yaml
+from:
+  - namespaceSelector:
+      matchLabels:
+        team: frontend
+
+    podSelector:
+      matchLabels:
+        app: frontend
+```
+
+The important point is that when `podSelector` and `namespaceSelector` appear **inside the same `from` entry**, they work together:
+
+```text
+Namespace must match
+        AND
+Pod must match
+```
+
+Conceptually:
+
+```text
+Namespace
+team=frontend
+      │
+      AND
+      │
+Pod
+app=frontend
+      │
+      ▼
+    ALLOW
+```
+
+---
+
+# 15. `ipBlock`
+
+NetworkPolicy can also allow traffic from specific IP ranges.
+
+Example:
+
+```yaml
+from:
+  - ipBlock:
+      cidr: 10.0.0.0/24
+```
+
+This allows traffic from the specified CIDR range, subject to the policy semantics and network plugin implementation.
+
+You can also use:
+
+```yaml
+ipBlock:
+  cidr: 10.0.0.0/16
+  except:
+    - 10.0.1.0/24
+```
+
+Meaning:
+
+```text
+Allow:
+10.0.0.0/16
+
+Except:
+10.0.1.0/24
+```
+
+---
+
+# 16. Default Deny Ingress
+
+A common security pattern is **Default Deny**.
+
+Example:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+
+metadata:
+  name: default-deny-ingress
+
+spec:
+  podSelector: {}
+
+  policyTypes:
+    - Ingress
+```
+
+The empty selector:
+
+```yaml
+podSelector: {}
+```
+
+selects all Pods in that namespace.
+
+This policy establishes ingress isolation for those Pods, after which additional policies can explicitly allow required traffic.
+
+Conceptually:
+
+```text
+All incoming traffic
+        │
+        ▼
+      DENY
+        │
+        ▼
+Specific NetworkPolicies
+        │
+        ▼
+Required traffic
+      ALLOW
+```
+
+---
+
+# 17. Default Deny Egress
+
+We can similarly restrict outgoing traffic:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+
+metadata:
+  name: default-deny-egress
+
+spec:
+  podSelector: {}
+
+  policyTypes:
+    - Egress
+```
+
+Now egress traffic from selected Pods is isolated until another applicable policy allows required destinations.
+
+---
+
+# 18. Default Deny Both
+
+For stronger isolation:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+
+metadata:
+  name: default-deny-all
+
+spec:
+  podSelector: {}
+
+  policyTypes:
+    - Ingress
+    - Egress
+```
+
+Conceptually:
+
+```text
+         Namespace
+             │
+      ┌──────┴──────┐
+      ▼             ▼
+   Ingress         Egress
+      │             │
+      ▼             ▼
+     DENY           DENY
+```
+
+Then we create specific allow policies.
+
+---
+
+# 19. Allow Specific Traffic
+
+After default deny, we can explicitly allow required communication.
+
+Example:
+
+```text
+Frontend → Backend → Database
+```
+
+Policies can enforce:
+
+```text
+Frontend → Backend      ✅
+Backend → Database      ✅
+
+Frontend → Database     ❌
+Other Pod → Database    ❌
+```
+
+This creates network segmentation between application tiers.
+
+---
+
+# 20. NetworkPolicy is Additive
+
+An important concept is that NetworkPolicies do not work like a traditional firewall where one later rule necessarily overrides an earlier rule.
+
+For a direction that is isolated, traffic is allowed if it is permitted by **at least one applicable NetworkPolicy**.
+
+For example:
+
+```text
+Policy A:
+Frontend → Backend : 8080
+
+Policy B:
+Monitoring → Backend : 9090
+```
+
+Both allowed connections can coexist.
+
+```text
+Frontend ──────► Backend :8080
+                     ▲
+                     │
+Monitoring ─────► Backend :9090
+```
+
+So policies are generally **additive** for allowed traffic.
+
+---
+
+# 21. NetworkPolicy and Services
+
+NetworkPolicy selects Pods, not Services.
+
+Suppose:
+
+```text
+Service
+   │
+   ▼
+Backend Pods
+```
+
+The policy applies to the Pods selected by the policy.
+
+For example:
+
+```yaml
+podSelector:
+  matchLabels:
+    app: backend
+```
+
+Even if users access the application through:
+
+```text
+backend-service
+```
+
+the NetworkPolicy is ultimately concerned with the selected Pods and their traffic.
+
+---
+
+# 22. NetworkPolicy and DNS
+
+When egress policies are enabled, DNS can become an important consideration.
+
+For example:
+
+```text
+Backend Pod
+    │
+    ├── DNS request ──► CoreDNS
+    │
+    └── API request ──► External API
+```
+
+If egress is restricted, the Pod may need an explicit rule allowing DNS traffic to the cluster's DNS service.
+
+A common pattern is to allow UDP/TCP port `53` to DNS Pods.
+
+Example pattern:
+
+```yaml
+egress:
+  - to:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kube-system
+
+        podSelector:
+          matchLabels:
+            k8s-app: kube-dns
+
+    ports:
+      - protocol: UDP
+        port: 53
+
+      - protocol: TCP
+        port: 53
+```
+
+The exact DNS labels can vary depending on the Kubernetes distribution and cluster setup, so they should be checked with:
+
+```bash
+kubectl get pods -n kube-system --show-labels
+```
+
+---
+
+# 23. Important Requirement — CNI Support
+
+NetworkPolicy is an API specification, but the actual enforcement is performed by the cluster's **network plugin / CNI**.
+
+Therefore:
+
+```text
+NetworkPolicy YAML
+        │
+        ▼
+Kubernetes API
+        │
+        ▼
+CNI / Network Plugin
+        │
+        ▼
+Actual Traffic Enforcement
+```
+
+If the CNI does not support NetworkPolicy enforcement, creating a NetworkPolicy object alone may not provide the expected network isolation.
+
+---
+
+# 24. Checking NetworkPolicies
+
+List policies:
+
+```bash
+kubectl get networkpolicy
+```
+
+or:
+
+```bash
+kubectl get netpol
+```
+
+Across all namespaces:
+
+```bash
+kubectl get networkpolicy -A
+```
+
+Describe:
+
+```bash
+kubectl describe networkpolicy backend-ingress
+```
+
+Get YAML:
+
+```bash
+kubectl get networkpolicy backend-ingress -o yaml
+```
+
+---
+
+# 25. Troubleshooting NetworkPolicy
+
+When network communication stops working, check:
+
+### Check Pods
+
+```bash
+kubectl get pods -o wide
+```
+
+### Check Services
+
+```bash
+kubectl get svc
+```
+
+### Check NetworkPolicies
+
+```bash
+kubectl get networkpolicy
+```
+
+### Describe policy
+
+```bash
+kubectl describe networkpolicy <policy-name>
+```
+
+### Check Pod labels
+
+```bash
+kubectl get pods --show-labels
+```
+
+This is especially important because selectors depend on labels.
+
+### Test connectivity
+
+A temporary debugging Pod can be useful:
+
+```bash
+kubectl run test-pod \
+  --image=curlimages/curl \
+  --rm -it \
+  -- sh
+```
+
+Then test connectivity from inside the cluster.
+
+---
+
+# 26. Common NetworkPolicy Mistakes
+
+### Mistake 1 — Wrong labels
+
+Policy:
+
+```yaml
+podSelector:
+  matchLabels:
+    app: backend
+```
+
+But Pod:
+
+```yaml
+labels:
+  app: api
+```
+
+Then the policy doesn't select that Pod.
+
+---
+
+### Mistake 2 — Forgetting Egress
+
+You may allow:
+
+```text
+Frontend → Backend
+```
+
+but forget that backend also needs:
+
+```text
+Backend → Database
+```
+
+If egress isolation is enabled, that connection may be blocked unless explicitly allowed.
+
+---
+
+### Mistake 3 — Blocking DNS
+
+A strict egress policy may accidentally prevent:
+
+```text
+Pod → CoreDNS
+```
+
+which can cause domain-name resolution failures.
+
+---
+
+### Mistake 4 — Assuming Service is selected
+
+NetworkPolicy doesn't select:
+
+```text
+Service
+```
+
+It selects:
+
+```text
+Pods
+```
+
+using selectors.
+
+---
+
+### Mistake 5 — Assuming Kubernetes itself enforces every policy
+
+The CNI must support and enforce NetworkPolicy.
+
+---
+
+# 27. Three-Tier Application Example
+
+A realistic architecture:
+
+```text
+                    Internet
+                       │
+                       ▼
+                 ┌───────────┐
+                 │  Ingress  │
+                 └─────┬─────┘
+                       │
+                       ▼
+              ┌─────────────────┐
+              │    Frontend     │
+              │   Pods          │
+              └────────┬────────┘
+                       │
+                  TCP 8080
+                       │
+                       ▼
+              ┌─────────────────┐
+              │     Backend     │
+              │      Pods       │
+              └────────┬────────┘
+                       │
+                  TCP 27017
+                       │
+                       ▼
+              ┌─────────────────┐
+              │     MongoDB     │
+              │      Pods       │
+              └─────────────────┘
+```
+
+Desired security model:
+
+```text
+Internet → Frontend        ✅
+Frontend → Backend         ✅
+Backend → MongoDB          ✅
+
+Internet → MongoDB         ❌
+Frontend → MongoDB         ❌
+Other Pods → MongoDB       ❌
+```
+
+NetworkPolicies can help enforce these communication boundaries.
+
+---
+
+# 28. NetworkPolicy Security Model
+
+A common approach is:
+
+```text
+1. Start with default deny
+           ↓
+2. Identify required communication
+           ↓
+3. Allow only required traffic
+           ↓
+4. Test application
+           ↓
+5. Monitor and refine policies
+```
+
+This is a practical implementation of **least-privilege networking**.
+
+---
+
+# 29. NetworkPolicy vs Firewall
+
+NetworkPolicy and traditional firewalls are related but operate at different layers and scopes.
+
+| NetworkPolicy                          | Traditional Firewall                |
+| -------------------------------------- | ----------------------------------- |
+| Kubernetes-native                      | Network/infrastructure-level        |
+| Primarily Pod traffic                  | Hosts, networks, interfaces, etc.   |
+| Uses Pod/Namespace selectors and CIDRs | Often IPs, ports, interfaces, zones |
+| Managed as Kubernetes objects          | Usually managed separately          |
+| Depends on CNI enforcement             | Depends on firewall technology      |
+
+They can complement each other rather than being mutually exclusive.
+
+---
+
+# 30. Key Concepts Learned
+
+Today I covered:
+
+* What NetworkPolicy is
+* Why NetworkPolicy is needed
+* Pod-level network isolation
+* Ingress
+* Egress
+* `podSelector`
+* `namespaceSelector`
+* `ipBlock`
+* `from`
+* `to`
+* `ports`
+* `policyTypes`
+* Default Deny
+* Allow-specific-traffic model
+* Additive policy behavior
+* NetworkPolicy + Services
+* NetworkPolicy + DNS
+* CNI/network plugin dependency
+* Troubleshooting NetworkPolicies
+* Network segmentation
+* Least-privilege networking
+* Three-tier application security
+
+---
+
+# 🎯 Final Takeaway
+
+The main concept I learned is:
+
+> **NetworkPolicy allows Kubernetes administrators to define which network connections are permitted between Pods, namespaces, and selected IP ranges.**
+
+Instead of allowing unrestricted Pod-to-Pod communication, NetworkPolicies can be used to implement a **least-privilege network model** where applications communicate only with the components they actually need.
+
+A practical pattern is:
+
+```text
+Default Deny
+     ↓
+Explicit Allow
+     ↓
+Least-Privilege Networking
+     ↓
+Better Pod Isolation
+     ↓
+Improved Kubernetes Security
+```
+
+NetworkPolicy is therefore an important part of securing Kubernetes workloads and building **segmented, zero-trust-oriented application architectures**.
+
+---
+
+## 📈 Kubernetes Security Learning Progress
+
+```text
+RBAC
+  ↓
+Service Accounts
+  ↓
+Least Privilege
+  ↓
+Secrets
+  ↓
+Security Context
+  ↓
+Pod Security Standards
+  ↓
+NetworkPolicy
+  ↓
+CRDs
+  ↓
+Helm
+  ↓
+Argo CD / GitOps
+```
+
+**Day's Focus:** Kubernetes Network Policies
+**Category:** Kubernetes Networking & Security
+**Status:** ✅ Completed
