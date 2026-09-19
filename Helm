@@ -1,0 +1,39 @@
+## Helm
+
+**Helm** is a package manager for Kubernetes that simplifies the deployment and management of Kubernetes applications. It uses **Helm Charts** to package Kubernetes resources such as Deployments, Services, ConfigMaps, and Secrets into a reusable and configurable unit.
+
+### Key Concepts
+
+* **Chart** – Package containing Kubernetes manifests and configuration.
+* **Release** – A deployed instance of a Helm Chart.
+* **Values** – Configuration used to customize a chart.
+* **Templates** – Dynamic Kubernetes YAML files using Helm's templating syntax.
+* **Repository** – A location where Helm Charts are stored and shared.
+
+### Common Commands
+
+```bash
+# Create a new chart
+helm create my-app
+
+# Install a chart
+helm install my-release ./my-app
+
+# List installed releases
+helm list
+
+# Upgrade a release
+helm upgrade my-release ./my-app
+
+# Rollback a release
+helm rollback my-release 1
+
+# Uninstall a release
+helm uninstall my-release
+```
+
+### Why Helm?
+
+Helm makes Kubernetes deployments **reusable, configurable, versioned, and easier to manage**, especially when applications contain multiple Kubernetes resources.
+
+> **Helm = Package Manager for Kubernetes**
