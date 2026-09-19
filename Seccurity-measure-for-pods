@@ -1,0 +1,310 @@
+🔐 Security Measures to Make a Kubernetes Pod More Secure
+1. Run Container as Non-Root User
+
+By default, kuch containers root user ke saath run kar sakte hain. Agar attacker container compromise kar le, toh root privileges dangerous ho sakti hain.
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+
+Benefit: Container process root ke as privileges ke bina run karega.
+
+2. Use Read-Only Root Filesystem
+
+Container ke root filesystem ko read-only bana do:
+
+securityContext:
+  readOnlyRootFilesystem: true
+
+Isse attacker container ke filesystem mein malicious files modify/create nahi kar paayega.
+
+Agar application ko temporary files chahiye:
+
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+
+volumes:
+  - name: tmp
+    emptyDir: {}
+3. Drop Linux Capabilities
+
+Linux capabilities container ko additional privileges deti hain. Unnecessary capabilities remove karni chahiye.
+
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+
+Agar specifically koi capability required ho:
+
+capabilities:
+  drop:
+    - ALL
+  add:
+    - NET_BIND_SERVICE
+
+Principle: Sirf required privilege do.
+
+4. Prevent Privilege Escalation
+
+Container process ko additional privileges gain karne se prevent karo.
+
+securityContext:
+  allowPrivilegeEscalation: false
+
+Ye especially useful hai agar application compromise ho jaye.
+
+5. Don't Use Privileged Containers
+
+Avoid:
+
+securityContext:
+  privileged: true
+
+privileged: true container ko host ke bahut powerful privileges de sakta hai.
+
+❌ Avoid unless there is a genuine infrastructure-level requirement.
+
+6. Use Seccomp
+
+Seccomp Linux system calls ko restrict karta hai.
+
+securityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+Container sirf allowed system calls use kar sakega.
+
+Simple way to remember:
+
+Seccomp = Restrict what system calls a container can make.
+
+7. Use AppArmor / SELinux
+
+Linux security mechanisms jaise AppArmor aur SELinux application/container ke behavior ko restrict kar sakte hain.
+
+For example, AppArmor can restrict things like:
+
+File access
+Network access
+Certain system operations
+
+Ye extra security layer provide karta hai.
+
+8. Don't Store Secrets Directly in Image
+
+❌ Don't do:
+
+ENV DB_PASSWORD=mysecret123
+
+Aur source code mein bhi:
+
+const password = "mysecret123";
+
+Instead Kubernetes Secret use karo:
+
+env:
+  - name: DB_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: db-secret
+        key: password
+
+For higher-security environments, external secret managers such as AWS Secrets Manager or HashiCorp Vault can also be used.
+
+9. Use NetworkPolicy
+
+By default, depending on the CNI/network configuration, pods may be able to communicate broadly.
+
+NetworkPolicy se define kar sakte ho:
+
+Kaunsa Pod kis Pod se communicate kar sakta hai?
+
+Example:
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend
+
+Meaning:
+
+Frontend Pod
+     |
+     | allowed
+     ↓
+Backend Pod
+
+Other Pods
+     |
+     X
+     ↓
+Backend
+10. Use Resource Requests and Limits
+
+Resource limits security ka direct replacement nahi hain, but resource exhaustion/DoS risk ko reduce karne mein help karte hain.
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+
+  limits:
+    cpu: "500m"
+    memory: "256Mi"
+
+Agar application uncontrolled memory/CPU consume kare, toh poore node ko affect karne ka risk reduce hota hai.
+
+11. Use Trusted Container Images
+
+Random/untrusted images use mat karo.
+
+Instead:
+
+image: myregistry/myapp:v1.2.0
+
+Aur image ko scan karo using tools such as:
+
+Trivy
+Docker Scout
+AWS ECR scanning
+
+Example:
+
+trivy image myapp:v1.2.0
+12. Don't Use latest Tag
+
+Avoid:
+
+image: myapp:latest
+
+Better:
+
+image: myapp:1.4.2
+
+Ya preferably immutable image digests.
+
+Why?
+
+latest tag change ho sakta hai, so same Pod definition different image pull kar sakti hai.
+
+13. Use Pod Security Standards
+
+Kubernetes Pod Security Standards (PSS) provide three levels:
+
+Privileged
+    ↓
+Baseline
+    ↓
+Restricted
+
+Production workloads ke liye Restricted profile ka goal strong security controls enforce karna hai.
+
+Example namespace level:
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+14. Use RBAC
+
+Pod/application ko unnecessarily Kubernetes API permissions mat do.
+
+For example, agar application ko Pods list karne ki zarurat nahi hai, toh usko permission mat do.
+
+Follow:
+
+Principle of Least Privilege
+
+Matlab:
+
+Required permission → YES
+Unnecessary permission → NO
+15. Secure Service Account
+
+Agar Pod ko Kubernetes API access ki zarurat nahi hai:
+
+spec:
+  automountServiceAccountToken: false
+
+Ye important hai because compromised Pod ke andar automatically available ServiceAccount token attacker ke liye useful ho sakta hai.
+
+🧩 Production Security Example
+
+Ek relatively secure Pod configuration kuch is type ki ho sakti hai:
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secure-app
+spec:
+  automountServiceAccountToken: false
+
+  containers:
+    - name: app
+      image: myapp:1.0.0
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+
+        capabilities:
+          drop:
+            - ALL
+
+        seccompProfile:
+          type: RuntimeDefault
+
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+
+        limits:
+          cpu: "500m"
+          memory: "256Mi"
+🧠 Easy Interview Formula
+
+Pod security ko yaad rakhne ke liye:
+
+        SECURE POD
+            │
+ ┌──────────┼───────────┐
+ │          │           │
+Non-root  Read-only   Drop
+          filesystem   capabilities
+ │          │           │
+No privilege escalation
+ │
+Seccomp
+ │
+NetworkPolicy
+ │
+RBAC
+ │
+Secrets
+ │
+Trusted Images
+ │
+Resource Limits
+ │
+Pod Security Standards
+
+Sabse important concepts pehle master karo:
+Non-root → capabilities → privilege escalation → read-only filesystem → seccomp → NetworkPolicy → RBAC → Secrets → Pod Security Standards.
