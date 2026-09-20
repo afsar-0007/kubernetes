@@ -1,0 +1,182 @@
+1. Application crashes
+
+The application itself may be failing during startup because of a code error, exception, or invalid configuration.
+
+Example:
+
+Application failed to start
+Connection refused
+Process exited with code 1
+2. Incorrect or missing environment variables
+
+The application may require environment variables that are missing or contain incorrect values.
+
+env:
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: db-secret
+        key: DATABASE_URL
+
+If the Secret or key is missing, the application may fail to start.
+
+3. Database or external service is unavailable
+
+The application may depend on MongoDB, PostgreSQL, Redis, another API, etc.
+
+Application
+    |
+    └──> MongoDB ❌ Connection refused
+              |
+              └──> Application exits
+
+This can cause repeated container crashes.
+
+4. Incorrect ConfigMap or Secret
+
+Common problems include:
+
+ConfigMap does not exist
+Secret does not exist
+Incorrect key name
+Incorrect configuration value
+Invalid configuration file
+5. Incorrect container command or arguments
+
+If the command specified in the Pod/Deployment is incorrect, the container may immediately exit.
+
+command:
+  - "./application"
+
+If ./application does not exist or cannot be executed, the container will crash.
+
+6. Image-related problems
+
+The container image itself may have a problem, such as:
+
+Incorrect image
+Missing application files
+Missing dependencies
+Incorrect architecture
+Broken entrypoint
+
+For example:
+
+exec ./app: no such file or directory
+7. Liveness probe failure
+
+A misconfigured liveness probe can repeatedly kill an otherwise running container.
+
+Container starts
+      ↓
+Liveness probe fails
+      ↓
+Kubernetes kills container
+      ↓
+Container restarts
+      ↓
+CrashLoopBackOff
+
+Check:
+
+kubectl describe pod <pod-name>
+
+Look at the Events section.
+
+8. Memory limit exceeded (OOMKilled)
+
+If a container uses more memory than its configured limit, Kubernetes may terminate it.
+
+Example:
+
+resources:
+  limits:
+    memory: "128Mi"
+
+If the application requires more than 128 MiB, it may be killed.
+
+You can check with:
+
+kubectl describe pod <pod-name>
+
+Look for:
+
+Reason: OOMKilled
+9. Volume or filesystem problems
+
+The application may require a file or directory that is not available.
+
+Possible causes:
+
+PVC is not mounted
+Incorrect mountPath
+Permission denied
+Required configuration file is missing
+Storage is unavailable
+10. Permission issues
+
+The container may not have permission to access a file, directory, port, or mounted volume.
+
+Example:
+
+Permission denied
+
+This can cause the application to terminate immediately.
+
+How to Troubleshoot CrashLoopBackOff
+Step 1 — Check the Pod
+kubectl get pods
+Step 2 — Check the logs
+kubectl logs <pod-name>
+Step 3 — Check logs from the previous crashed container
+
+This is very important:
+
+kubectl logs <pod-name> --previous
+Step 4 — Describe the Pod
+kubectl describe pod <pod-name>
+
+Pay particular attention to:
+
+State
+Last State
+Reason
+Exit Code
+Events
+Step 5 — Check resource-related issues
+kubectl describe pod <pod-name>
+
+Look for:
+
+OOMKilled
+Quick Troubleshooting Flow
+             CrashLoopBackOff
+                    |
+                    ↓
+          kubectl logs POD --previous
+                    |
+             ┌──────┴──────┐
+             ↓             ↓
+          Error found?    No clear error
+             |             |
+             ↓             ↓
+       Fix application   describe pod
+                           |
+                           ↓
+                        Events
+                           |
+          ┌────────────────┼────────────────┐
+          ↓                ↓                ↓
+       OOMKilled       Probe failure    Config/Secret
+          |                |                |
+          ↓                ↓                ↓
+     Increase/fix       Fix probe       Fix configuration
+       memory
+Most useful commands
+kubectl get pods
+kubectl logs <pod-name>
+kubectl logs <pod-name> --previous
+kubectl describe pod <pod-name>
+kubectl get pod <pod-name> -o wide
+
+Key point: CrashLoopBackOff is not itself the root cause. It is Kubernetes telling you that the container keeps failing and is being restarted repeatedly. The actual cause is usually revealed by kubectl logs --previous and the Events section of kubectl describe pod.
