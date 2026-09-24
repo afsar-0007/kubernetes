@@ -1,0 +1,790 @@
+# 🔐 Kubernetes Pod Security
+
+Securing Kubernetes workloads is important because a compromised or misconfigured Pod can potentially expose applications, credentials, or even the underlying node.
+
+Kubernetes security should be implemented in layers — from the **Pod configuration** to **RBAC, Network Policies, Secrets, container images, and cluster-level controls**.
+
+---
+
+## 1. Run Containers as a Non-Root User
+
+By default, a container may run as the `root` user.
+
+Running applications as a non-root user reduces the impact of a container compromise.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secure-pod
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+
+  containers:
+    - name: app
+      image: nginx:1.27
+```
+
+### Important fields
+
+| Field          | Purpose                                     |
+| -------------- | ------------------------------------------- |
+| `runAsNonRoot` | Prevents the container from running as root |
+| `runAsUser`    | Specifies the Linux UID                     |
+| `runAsGroup`   | Specifies the Linux GID                     |
+| `fsGroup`      | Controls group ownership of mounted volumes |
+
+---
+
+# 2. Disable Privilege Escalation
+
+A container should not be allowed to gain additional Linux privileges.
+
+```yaml
+securityContext:
+  allowPrivilegeEscalation: false
+```
+
+Example:
+
+```yaml
+containers:
+  - name: app
+    image: myapp:1.0
+    securityContext:
+      allowPrivilegeEscalation: false
+```
+
+This is particularly important when the application does not require elevated privileges.
+
+---
+
+# 3. Drop Linux Capabilities
+
+Linux capabilities provide specific privileges to processes.
+
+Instead of giving a container unnecessary capabilities, drop them.
+
+```yaml
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+```
+
+Example:
+
+```yaml
+containers:
+  - name: app
+    image: myapp:1.0
+    securityContext:
+      capabilities:
+        drop:
+          - ALL
+```
+
+If a specific application requires a capability, add only the required one.
+
+```yaml
+capabilities:
+  drop:
+    - ALL
+  add:
+    - NET_BIND_SERVICE
+```
+
+### Principle
+
+> Give containers only the privileges they actually need.
+
+This follows the **Principle of Least Privilege**.
+
+---
+
+# 4. Use a Read-Only Root Filesystem
+
+If an application does not need to write to its filesystem, make the root filesystem read-only.
+
+```yaml
+securityContext:
+  readOnlyRootFilesystem: true
+```
+
+Example:
+
+```yaml
+containers:
+  - name: app
+    image: myapp:1.0
+    securityContext:
+      readOnlyRootFilesystem: true
+```
+
+This makes it harder for an attacker to modify binaries or write malicious files inside the container.
+
+### What if the application needs temporary storage?
+
+Use an `emptyDir` volume:
+
+```yaml
+volumes:
+  - name: tmp
+    emptyDir: {}
+
+containers:
+  - name: app
+    image: myapp:1.0
+    volumeMounts:
+      - name: tmp
+        mountPath: /tmp
+```
+
+---
+
+# 5. Use Seccomp
+
+Seccomp restricts the Linux system calls that a container can make.
+
+Kubernetes can use the runtime's `RuntimeDefault` seccomp profile:
+
+```yaml
+securityContext:
+  seccompProfile:
+    type: RuntimeDefault
+```
+
+Example:
+
+```yaml
+containers:
+  - name: app
+    image: myapp:1.0
+    securityContext:
+      seccompProfile:
+        type: RuntimeDefault
+```
+
+This reduces the number of system calls available to the container.
+
+---
+
+# 6. Use AppArmor or SELinux
+
+Linux security mechanisms such as **AppArmor** and **SELinux** provide additional protection.
+
+They can restrict what processes inside containers are allowed to access.
+
+For example, AppArmor can restrict:
+
+* File access
+* Network operations
+* Process execution
+* System resources
+
+Availability and configuration depend on the Kubernetes node operating system and container runtime.
+
+---
+
+# 7. Avoid Privileged Containers
+
+Never use:
+
+```yaml
+securityContext:
+  privileged: true
+```
+
+unless there is a strong operational requirement.
+
+A privileged container can receive extensive access to the host.
+
+Prefer:
+
+```yaml
+securityContext:
+  privileged: false
+```
+
+or simply omit the field when the default behavior is sufficient.
+
+---
+
+# 8. Restrict Host Access
+
+Avoid unnecessary host-level access such as:
+
+```yaml
+hostNetwork: true
+hostPID: true
+hostIPC: true
+```
+
+These settings can allow a Pod to interact more directly with the node.
+
+Only use them when the workload genuinely requires them.
+
+---
+
+# 9. Avoid HostPath When Possible
+
+Be careful with:
+
+```yaml
+volumes:
+  - name: host-data
+    hostPath:
+      path: /etc
+```
+
+`hostPath` exposes parts of the node filesystem to the Pod.
+
+Prefer Kubernetes-managed storage such as:
+
+* PersistentVolume
+* PersistentVolumeClaim
+* StorageClass
+
+when appropriate.
+
+---
+
+# 10. Use Kubernetes Secrets
+
+Do not hard-code passwords, API keys, or tokens directly into container images or Git repositories.
+
+Bad:
+
+```yaml
+env:
+  - name: DB_PASSWORD
+    value: "mypassword123"
+```
+
+Instead, use a Kubernetes Secret:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-secret
+type: Opaque
+stringData:
+  DB_PASSWORD: "mypassword123"
+```
+
+Then reference it:
+
+```yaml
+env:
+  - name: DB_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: db-secret
+        key: DB_PASSWORD
+```
+
+### Important
+
+Kubernetes Secrets are **not automatically equivalent to strong encryption**. They should be protected with appropriate RBAC and, for stronger protection, encryption at rest and/or an external secrets management system.
+
+Examples:
+
+* AWS Secrets Manager
+* HashiCorp Vault
+* External Secrets Operator
+
+---
+
+# 11. Use RBAC
+
+RBAC controls **who can perform which actions on which Kubernetes resources**.
+
+Avoid giving users or ServiceAccounts:
+
+```yaml
+verbs:
+  - "*"
+resources:
+  - "*"
+```
+
+Instead, grant only required permissions.
+
+Example:
+
+```yaml
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+```
+
+### Principle
+
+> Don't give `cluster-admin` unless it is genuinely required.
+
+---
+
+# 12. Create a Dedicated ServiceAccount
+
+Do not automatically use the default ServiceAccount for applications.
+
+Create a dedicated ServiceAccount:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app-sa
+```
+
+Then use it:
+
+```yaml
+spec:
+  serviceAccountName: app-sa
+```
+
+This allows you to create specific RBAC permissions for the application.
+
+---
+
+# 13. Disable Automatic ServiceAccount Token Mounting
+
+If the application does not need to communicate with the Kubernetes API, disable token mounting.
+
+```yaml
+spec:
+  automountServiceAccountToken: false
+```
+
+Example:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secure-pod
+spec:
+  automountServiceAccountToken: false
+
+  containers:
+    - name: app
+      image: nginx:1.27
+```
+
+This prevents an unnecessary Kubernetes API credential from being automatically exposed to the container.
+
+---
+
+# 14. Use Network Policies
+
+By default, Kubernetes networking may allow broad Pod-to-Pod communication depending on the CNI/network setup.
+
+Use `NetworkPolicy` to control traffic.
+
+Example:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api
+spec:
+  podSelector:
+    matchLabels:
+      app: api
+
+  policyTypes:
+    - Ingress
+
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend
+
+      ports:
+        - protocol: TCP
+          port: 8080
+```
+
+This allows traffic to the API only from Pods labeled:
+
+```text
+app: frontend
+```
+
+### Important
+
+NetworkPolicy requires a network plugin/CNI that supports NetworkPolicy enforcement.
+
+---
+
+# 15. Define Resource Requests and Limits
+
+Resource limits help prevent a workload from consuming excessive CPU or memory.
+
+```yaml
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+```
+
+This helps protect cluster resources from misbehaving workloads.
+
+---
+
+# 16. Add Health Probes
+
+Use Kubernetes probes to detect unhealthy applications.
+
+### Liveness Probe
+
+Determines whether the container should be restarted.
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 10
+```
+
+### Readiness Probe
+
+Determines whether the Pod should receive traffic.
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 5
+```
+
+### Startup Probe
+
+Useful for applications that take longer to start.
+
+```yaml
+startupProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  failureThreshold: 30
+  periodSeconds: 10
+```
+
+---
+
+# 17. Scan Container Images
+
+Security starts before the image reaches Kubernetes.
+
+Use tools such as:
+
+* Trivy
+* Docker Scout
+* Snyk
+* Grype
+
+Example:
+
+```bash
+trivy image nginx:1.27
+```
+
+Docker Scout:
+
+```bash
+docker scout cves nginx:1.27
+```
+
+Scan images for:
+
+* CVEs
+* Vulnerable packages
+* OS vulnerabilities
+* Application dependencies
+* Misconfigurations
+
+---
+
+# 18. Use Trusted and Minimal Images
+
+Avoid unnecessarily large images.
+
+Instead of:
+
+```dockerfile
+FROM ubuntu:latest
+```
+
+consider a minimal runtime image when appropriate.
+
+Examples:
+
+```dockerfile
+FROM alpine
+```
+
+or:
+
+```dockerfile
+FROM gcr.io/distroless/static
+```
+
+The exact base image depends on the application.
+
+Also avoid blindly using:
+
+```text
+latest
+```
+
+for production workloads.
+
+Prefer controlled, immutable image references such as:
+
+```text
+myapp:1.4.2
+```
+
+or, for stronger immutability:
+
+```text
+myapp@sha256:<digest>
+```
+
+---
+
+# 19. Sign and Verify Container Images
+
+For higher-security environments, container images can be signed and verified.
+
+Tools such as **Cosign** can be used for image signing.
+
+Conceptually:
+
+```text
+Build Image
+     ↓
+Scan Image
+     ↓
+Sign Image
+     ↓
+Push Image
+     ↓
+Verify Image
+     ↓
+Deploy to Kubernetes
+```
+
+This helps establish that the deployed image came from a trusted build/publishing process.
+
+---
+
+# 20. Apply Pod Security Standards
+
+Kubernetes provides **Pod Security Standards (PSS)** with three levels:
+
+### Privileged
+
+Unrestricted policy.
+
+### Baseline
+
+Prevents commonly known privilege escalations.
+
+### Restricted
+
+Strongly restricted configuration following security best practices.
+
+For example, a namespace can be configured with the `restricted` Pod Security Standard using labels such as:
+
+```yaml
+metadata:
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+```
+
+This allows Kubernetes to enforce, audit, and warn about Pod configurations that violate the selected standard.
+
+---
+
+# 21. Complete Secure Pod Example
+
+A practical secure Pod configuration can combine several of these controls:
+
+```yaml
+apiVersion: v1
+kind: Pod
+
+metadata:
+  name: secure-app
+
+spec:
+  automountServiceAccountToken: false
+
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+
+  containers:
+    - name: app
+      image: myapp:1.0
+
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+
+        capabilities:
+          drop:
+            - ALL
+
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8080
+
+      readinessProbe:
+        httpGet:
+          path: /ready
+          port: 8080
+
+      ports:
+        - containerPort: 8080
+```
+
+---
+
+# 🛡️ Kubernetes Pod Security Checklist
+
+Before deploying a Pod, check:
+
+```text
+☑ Run as non-root
+☑ Disable privilege escalation
+☑ Drop unnecessary Linux capabilities
+☑ Use read-only root filesystem
+☑ Use seccomp
+☑ Avoid privileged containers
+☑ Avoid unnecessary hostNetwork/hostPID/hostIPC
+☑ Avoid hostPath when possible
+☑ Use dedicated ServiceAccounts
+☑ Disable ServiceAccount token mounting when unnecessary
+☑ Apply least-privilege RBAC
+☑ Use NetworkPolicies
+☑ Store credentials in Secrets / external secret managers
+☑ Define CPU and memory requests/limits
+☑ Configure liveness/readiness/startup probes
+☑ Scan container images
+☑ Use minimal and trusted base images
+☑ Avoid mutable `latest` tags
+☑ Consider image signing and verification
+☑ Apply Pod Security Standards
+☑ Keep Kubernetes and container images patched
+```
+
+---
+
+# 🔄 Security in a DevOps Pipeline
+
+Kubernetes security should not start only after deployment.
+
+A secure workflow looks like:
+
+```text
+Developer
+   ↓
+Git Push
+   ↓
+CI Pipeline
+   ↓
+Build Docker Image
+   ↓
+SAST / Dependency Scan
+   ↓
+Container Image Scan
+   ↓
+Sign Image
+   ↓
+Push to Registry
+   ↓
+Kubernetes Deployment
+   ↓
+Pod Security Standards
+   ↓
+RBAC + NetworkPolicy
+   ↓
+Runtime Monitoring
+```
+
+For a DevOps environment, tools such as **GitHub Actions, Trivy, Docker Scout, Kubernetes RBAC, NetworkPolicy, Pod Security Standards, and Argo CD** can work together as different security layers.
+
+---
+
+# 🎯 Key Principle
+
+Kubernetes security follows the **defense-in-depth** approach.
+
+```text
+                Kubernetes Security
+                       │
+       ┌───────────────┼───────────────┐
+       ↓               ↓               ↓
+ Container          Kubernetes       Network
+ Security             RBAC           Security
+       │               │               │
+ Non-root          ServiceAccount   NetworkPolicy
+ Capabilities      Least Privilege   Ingress Rules
+ Seccomp           Secrets           TLS
+ Read-only FS
+       │
+       ↓
+ Image Security
+       │
+ Trivy / Scout
+ Image Signing
+ Trusted Images
+       │
+       ↓
+ Runtime Security
+       │
+ Monitoring
+ Logging
+ Alerts
+```
+
+The goal is **not just to secure the Pod**. The goal is to create multiple security layers so that if one control fails, other controls can limit the damage.
