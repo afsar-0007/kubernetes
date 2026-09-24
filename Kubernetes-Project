@@ -1,0 +1,863 @@
+# 🚀 DevOpsified Go Web Application
+
+## 📌 Project Overview
+
+This project demonstrates how a simple **Golang web application** can be transformed into a production-oriented, DevOps-enabled application using modern **containerization, Kubernetes, CI/CD, Helm, AWS EKS, and GitOps** practices.
+
+The original Go application was a basic web application serving web pages using Go's `net/http` package. I progressively integrated DevOps practices around the application to make it **containerized, scalable, automated, secure, and deployable on Kubernetes**.
+
+The project follows an end-to-end workflow:
+
+```text
+Go Application
+      ↓
+Docker Containerization
+      ↓
+Docker Image
+      ↓
+Docker Hub
+      ↓
+Kubernetes Deployment
+      ↓
+Helm Chart
+      ↓
+AWS EKS
+      ↓
+GitHub Actions CI
+      ↓
+Argo CD GitOps CD
+      ↓
+Automated Kubernetes Deployment
+```
+
+---
+
+# 🛠️ Tech Stack
+
+### Application
+
+* Go / Golang
+* `net/http`
+* HTML
+* CSS
+
+### Containerization
+
+* Docker
+* Dockerfile
+* Multi-stage Docker Build
+* Distroless Runtime Image
+* Docker Hub
+
+### Kubernetes
+
+* Kubernetes
+* Amazon EKS
+* Deployments
+* ReplicaSets
+* Pods
+* Services
+* Ingress
+* ConfigMaps / Secrets
+* Resource Management
+
+### Kubernetes Package Management
+
+* Helm
+
+### CI/CD
+
+* GitHub Actions
+* Argo CD
+
+### Cloud
+
+* AWS
+* Amazon EKS
+* AWS IAM
+* AWS networking
+
+### Security
+
+* Trivy
+* Docker Scout
+* Non-root containers
+* Container image scanning
+* Kubernetes security controls
+
+---
+
+# 🏗️ Architecture
+
+```text
+                    ┌──────────────────┐
+                    │   Developer      │
+                    │   Git Push       │
+                    └────────┬─────────┘
+                             │
+                             ▼
+                    ┌──────────────────┐
+                    │     GitHub       │
+                    │   Source Code    │
+                    └────────┬─────────┘
+                             │
+                             ▼
+                    ┌──────────────────┐
+                    │ GitHub Actions   │
+                    │      CI          │
+                    └────────┬─────────┘
+                             │
+                 ┌───────────┴───────────┐
+                 ▼                       ▼
+          Build & Test            Security Scan
+                 │                 Trivy / Scout
+                 └───────────┬───────────┘
+                             ▼
+                    ┌──────────────────┐
+                    │   Docker Image   │
+                    └────────┬─────────┘
+                             │
+                             ▼
+                    ┌──────────────────┐
+                    │   Docker Hub     │
+                    │ Image Registry   │
+                    └────────┬─────────┘
+                             │
+                             ▼
+                    ┌──────────────────┐
+                    │     Argo CD      │
+                    │    GitOps CD     │
+                    └────────┬─────────┘
+                             │
+                             ▼
+              ┌────────────────────────────┐
+              │       AWS EKS Cluster      │
+              │                            │
+              │  ┌──────────────────────┐  │
+              │  │ Kubernetes Deployment│  │
+              │  └──────────┬───────────┘  │
+              │             │              │
+              │       ┌─────┴─────┐        │
+              │       ▼           ▼        │
+              │     Pod 1       Pod 2      │
+              │       │           │        │
+              │       └─────┬─────┘        │
+              │             ▼              │
+              │         Service            │
+              │             │              │
+              │             ▼              │
+              │          Ingress           │
+              └────────────────────────────┘
+```
+
+---
+
+# 1️⃣ Started With a Basic Go Application
+
+The initial application was a simple Go web application using the standard `net/http` package.
+
+The application was responsible for:
+
+* Starting an HTTP server
+* Serving web pages
+* Handling HTTP requests
+* Returning application content
+
+Initially, the application could be run directly on a local machine:
+
+```bash
+go run main.go
+```
+
+However, this approach does not provide a consistent deployment environment or automated deployment workflow.
+
+So I started adding DevOps practices around the application.
+
+---
+
+# 2️⃣ Containerized the Go Application With Docker
+
+The first major step was to package the Go application into a Docker container.
+
+Instead of requiring users to manually install Go and configure the runtime environment, the application and its runtime dependencies could be packaged into an image.
+
+Example:
+
+```dockerfile
+FROM golang:1.21 AS builder
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux go build -o app .
+
+FROM gcr.io/distroless/static-debian12
+
+WORKDIR /app
+
+COPY --from=builder /app/app .
+
+EXPOSE 8080
+
+CMD ["/app/app"]
+```
+
+---
+
+# 3️⃣ Implemented a Multi-Stage Docker Build
+
+Instead of using the complete Go development image as the production runtime, I used a **multi-stage Docker build**.
+
+### Stage 1 — Build
+
+```text
+golang:1.21
+```
+
+This stage contains everything required to compile the Go application.
+
+### Stage 2 — Runtime
+
+```text
+distroless/static
+```
+
+Only the compiled application is copied into the final image.
+
+```text
+Go Source Code
+      ↓
+Go Builder Image
+      ↓
+Compile Application
+      ↓
+Go Binary
+      ↓
+Distroless Runtime
+```
+
+### Benefits
+
+* Smaller production image
+* Reduced attack surface
+* No unnecessary build tools in runtime
+* Cleaner production environment
+* Faster image transfer
+
+The resulting application image was around **50 MB** in the implementation.
+
+---
+
+# 4️⃣ Tested the Docker Image Locally
+
+After creating the Dockerfile, I built the image:
+
+```bash
+docker build -t afsar-go-web-app:latest .
+```
+
+Then ran the container:
+
+```bash
+docker run -p 8080:8080 afsar-go-web-app:latest
+```
+
+The application could then be accessed through:
+
+```text
+http://localhost:8080
+```
+
+I also used Docker commands to inspect the image and container.
+
+---
+
+# 5️⃣ Pushed the Image to Docker Hub
+
+After validating the image locally, I pushed it to Docker Hub.
+
+```bash
+docker login
+```
+
+Tagged the image:
+
+```bash
+docker tag afsar-go-web-app:latest afsarsohail/afsar-go-web-app:latest
+```
+
+Then pushed it:
+
+```bash
+docker push afsarsohail/afsar-go-web-app:latest
+```
+
+Docker Hub became the **container image registry** for the application.
+
+The flow became:
+
+```text
+Source Code
+     ↓
+Docker Build
+     ↓
+Docker Image
+     ↓
+Docker Hub
+```
+
+---
+
+# 6️⃣ Deployed the Application on Kubernetes
+
+After containerization, I created Kubernetes manifests to deploy the application.
+
+The application was deployed using a Kubernetes `Deployment`.
+
+Example:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-web-app
+spec:
+  replicas: 2
+
+  selector:
+    matchLabels:
+      app: go-web-app
+
+  template:
+    metadata:
+      labels:
+        app: go-web-app
+
+    spec:
+      containers:
+        - name: go-web-app
+          image: afsarsohail/afsar-go-web-app:latest
+          ports:
+            - containerPort: 8080
+```
+
+I configured **2 replicas** to provide basic application redundancy.
+
+Instead of running only one Pod:
+
+```text
+Pod
+```
+
+the application runs as:
+
+```text
+        Deployment
+             │
+       ┌─────┴─────┐
+       ▼           ▼
+     Pod 1       Pod 2
+```
+
+If one Pod fails, Kubernetes can maintain the desired replica count.
+
+---
+
+# 7️⃣ Created a Kubernetes Service
+
+Pods are ephemeral, so I created a Kubernetes `Service` to provide a stable network endpoint.
+
+Example:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: go-web-service
+spec:
+  selector:
+    app: go-web-app
+
+  ports:
+    - port: 80
+      targetPort: 8080
+
+  type: ClusterIP
+```
+
+The Service provides:
+
+```text
+Service Port: 80
+       ↓
+Pod Port: 8080
+```
+
+It also provides load balancing across the application Pods selected by the Service.
+
+---
+
+# 8️⃣ Added Kubernetes Ingress
+
+To expose the application through HTTP routing, I configured an Ingress.
+
+The traffic flow became:
+
+```text
+User
+ ↓
+Ingress
+ ↓
+Service
+ ↓
+Pod
+```
+
+The Ingress handles external HTTP/HTTPS routing and forwards requests to the Kubernetes Service.
+
+This provides a cleaner architecture than exposing every application Pod directly.
+
+---
+
+# 9️⃣ Converted Kubernetes Manifests Into a Helm Chart
+
+Managing multiple raw YAML files can become difficult as applications grow.
+
+So I converted the Kubernetes manifests into a **Helm Chart**.
+
+The structure became:
+
+```text
+go-web-app/
+│
+├── Chart.yaml
+├── values.yaml
+│
+└── templates/
+    ├── deployment.yaml
+    ├── service.yaml
+    ├── ingress.yaml
+    └── ...
+```
+
+Instead of hard-coding configuration values, I moved configurable values into:
+
+```text
+values.yaml
+```
+
+For example:
+
+```yaml
+replicaCount: 2
+
+image:
+  repository: afsarsohail/afsar-go-web-app
+  tag: latest
+
+service:
+  type: ClusterIP
+  port: 80
+```
+
+This makes the application easier to deploy across different environments.
+
+---
+
+# 🔟 Deployed the Application to Amazon EKS
+
+After testing the Kubernetes deployment, I deployed the application to **Amazon Elastic Kubernetes Service (EKS)**.
+
+The architecture became:
+
+```text
+                    AWS
+                     │
+                     ▼
+               Amazon EKS
+                     │
+             ┌───────┴───────┐
+             ▼               ▼
+          Node 1           Node 2
+             │               │
+             ▼               ▼
+           Pods             Pods
+```
+
+I connected my local Kubernetes client to the EKS cluster using:
+
+```bash
+aws eks update-kubeconfig \
+  --region eu-north-1 \
+  --name Cluster-1
+```
+
+Then verified the cluster:
+
+```bash
+kubectl get nodes
+```
+
+And deployed the application using Helm:
+
+```bash
+helm install go-web-app ./go-web-app
+```
+
+---
+
+# 1️⃣1️⃣ Implemented CI With GitHub Actions
+
+The next step was automating the software delivery process.
+
+I created a GitHub Actions workflow to automate tasks such as:
+
+```text
+Git Push
+   ↓
+GitHub Actions
+   ↓
+Checkout Code
+   ↓
+Setup Go
+   ↓
+Install Dependencies
+   ↓
+Run Tests
+   ↓
+Static Analysis
+   ↓
+Build Application
+   ↓
+Build Docker Image
+   ↓
+Security Scan
+   ↓
+Push Image to Docker Hub
+```
+
+This removed the need to manually perform these steps after every code change.
+
+---
+
+# 1️⃣2️⃣ Added Container Security Scanning
+
+I integrated container security practices into the workflow using tools such as:
+
+### Trivy
+
+Used to scan container images for known vulnerabilities.
+
+Example:
+
+```bash
+trivy image afsarsohail/afsar-go-web-app:latest
+```
+
+### Docker Scout
+
+Used to analyze container images and identify vulnerabilities and security recommendations.
+
+```bash
+docker scout cves afsarsohail/afsar-go-web-app:latest
+```
+
+The purpose was to identify security issues before deploying the image to Kubernetes.
+
+---
+
+# 1️⃣3️⃣ Implemented GitOps With Argo CD
+
+For continuous delivery, I used **Argo CD**.
+
+Instead of manually deploying every new version to Kubernetes, Argo CD continuously monitors the desired state stored in Git.
+
+The workflow became:
+
+```text
+Developer
+    ↓
+Git Push
+    ↓
+GitHub Actions
+    ↓
+Build + Test + Scan
+    ↓
+Docker Image
+    ↓
+Docker Hub
+    ↓
+Git Repository
+    ↓
+Argo CD
+    ↓
+AWS EKS
+```
+
+Argo CD follows the Git repository as the source of truth for the Kubernetes application's desired state.
+
+If the Kubernetes cluster differs from the desired configuration, Argo CD can detect the drift and synchronize the application according to its configured policy.
+
+---
+
+# 1️⃣4️⃣ CI vs CD in This Project
+
+## Continuous Integration
+
+Handled primarily by:
+
+```text
+GitHub Actions
+```
+
+Responsibilities:
+
+* Code checkout
+* Go setup
+* Dependency installation
+* Testing
+* Static checks
+* Docker image build
+* Security scanning
+* Image publishing
+
+---
+
+## Continuous Delivery / Deployment
+
+Handled using:
+
+```text
+Argo CD
+```
+
+Responsibilities:
+
+* Monitor Git repository
+* Compare desired and live Kubernetes state
+* Detect configuration drift
+* Synchronize application state
+* Deploy Kubernetes changes
+
+---
+
+# 🔐 1️⃣5️⃣ Security Practices
+
+Security was considered at multiple layers.
+
+### Container Security
+
+* Multi-stage Docker builds
+* Distroless runtime image
+* Image vulnerability scanning
+* Reduced runtime dependencies
+
+### Kubernetes Security
+
+* Non-root containers where supported
+* Restricted Linux capabilities
+* Resource requests and limits
+* Kubernetes RBAC
+* Secrets for sensitive configuration
+* NetworkPolicy where applicable
+
+### CI/CD Security
+
+* GitHub Actions secrets for credentials
+* Docker Hub authentication through secrets
+* Automated image scanning
+
+The overall approach follows **defense in depth** rather than relying on a single security mechanism.
+
+---
+
+# 📊 1️⃣6️⃣ DevOps Transformation
+
+The project evolved from:
+
+```text
+Simple Go Application
+```
+
+into:
+
+```text
+┌────────────────────────────────────┐
+│       DevOpsified Go Application   │
+├────────────────────────────────────┤
+│                                    │
+│  Go Application                    │
+│       ↓                            │
+│  Docker                            │
+│       ↓                            │
+│  Multi-stage Build                 │
+│       ↓                            │
+│  Distroless Image                 │
+│       ↓                            │
+│  Docker Hub                        │
+│       ↓                            │
+│  Kubernetes                        │
+│       ↓                            │
+│  Helm                              │
+│       ↓                            │
+│  AWS EKS                           │
+│       ↓                            │
+│  GitHub Actions                    │
+│       ↓                            │
+│  Trivy / Docker Scout              │
+│       ↓                            │
+│  Argo CD                           │
+│       ↓                            │
+│  GitOps Deployment                 │
+│                                    │
+└────────────────────────────────────┘
+```
+
+---
+
+# 🎯 Key DevOps Concepts Demonstrated
+
+Through this project, I implemented and practiced:
+
+* Containerization
+* Docker multi-stage builds
+* Distroless containers
+* Container image optimization
+* Container registries
+* Kubernetes Deployments
+* Kubernetes Services
+* Kubernetes Ingress
+* Helm
+* Kubernetes configuration management
+* Amazon EKS
+* CI with GitHub Actions
+* Container security scanning
+* GitOps
+* Continuous Delivery with Argo CD
+* Infrastructure/application deployment on AWS
+* Kubernetes security best practices
+
+---
+
+# 📁 Project Structure
+
+```text
+go-web-app/
+│
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+│
+├── helm/
+│   └── go-web-app/
+│       ├── Chart.yaml
+│       ├── values.yaml
+│       └── templates/
+│           ├── deployment.yaml
+│           ├── service.yaml
+│           └── ingress.yaml
+│
+├── static/
+│   ├── index.html
+│   ├── style.css
+│   └── ...
+│
+├── main.go
+├── go.mod
+├── go.sum
+├── Dockerfile
+└── README.md
+```
+
+---
+
+# 🚀 Final DevOps Workflow
+
+```text
+                    ┌─────────────┐
+                    │  Developer  │
+                    └──────┬──────┘
+                           │
+                           ▼
+                    ┌─────────────┐
+                    │   GitHub    │
+                    └──────┬──────┘
+                           │
+                           ▼
+                  ┌─────────────────┐
+                  │ GitHub Actions  │
+                  │       CI        │
+                  └────────┬────────┘
+                           │
+              ┌────────────┼────────────┐
+              │            │            │
+              ▼            ▼            ▼
+            Build        Test       Security
+                                      Scan
+              │            │            │
+              └────────────┼────────────┘
+                           ▼
+                    Docker Image
+                           │
+                           ▼
+                      Docker Hub
+                           │
+                           ▼
+                     Git / Helm
+                           │
+                           ▼
+                       Argo CD
+                           │
+                           ▼
+                      AWS EKS
+                           │
+                    ┌──────┴──────┐
+                    ▼             ▼
+                  Pod 1         Pod 2
+                    │             │
+                    └──────┬──────┘
+                           ▼
+                       Service
+                           │
+                           ▼
+                        Ingress
+                           │
+                           ▼
+                          User
+```
+
+---
+
+# 🧠 What This Project Demonstrates
+
+The main objective of this project was not simply to deploy a Go application.
+
+It demonstrates how DevOps practices can be applied to an application throughout its lifecycle:
+
+```text
+Develop
+   ↓
+Build
+   ↓
+Test
+   ↓
+Containerize
+   ↓
+Scan
+   ↓
+Publish
+   ↓
+Package
+   ↓
+Deploy
+   ↓
+Monitor Desired State
+   ↓
+Continuously Deliver
+```
+
+By combining **Docker, Kubernetes, Helm, AWS EKS, GitHub Actions, Docker Hub, Trivy/Docker Scout, and Argo CD**, the project demonstrates a complete application delivery workflow from source code to a GitOps-managed Kubernetes deployment.
